@@ -69,7 +69,7 @@
 				/* suspended state */
 				mux {
 					pins = "gpio6", "gpio7";
-					function = "gpio";
+					function = "blsp_i2c2";
 				};
 
 				config {
