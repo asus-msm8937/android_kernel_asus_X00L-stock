@@ -309,6 +309,10 @@ config BW_MONITOR
 	 it by registering the bus bandwidth as a sensor in
 	 thermal core framework.
 
+config K89219_FEATURES
+         tristate "Currect project is K89219"
+         default n
+
 source "drivers/platform/msm/spmi/Kconfig"
 
 endmenu

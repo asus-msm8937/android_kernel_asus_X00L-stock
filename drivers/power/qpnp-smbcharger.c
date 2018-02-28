@@ -5029,6 +5029,7 @@ static void handle_usb_insertion(struct smbchg_chip *chip)
 	}
 }
 
+int usb_state=-1;
 void update_usb_status(struct smbchg_chip *chip, bool usb_present, bool force)
 {
 	mutex_lock(&chip->usb_status_lock);
@@ -5040,9 +5041,13 @@ void update_usb_status(struct smbchg_chip *chip, bool usb_present, bool force)
 	}
 	if (!chip->usb_present && usb_present) {
 		chip->usb_present = usb_present;
+		//printk("xiehong add usb in!\n");
+		usb_state = 1;
 		handle_usb_insertion(chip);
 	} else if (chip->usb_present && !usb_present) {
 		chip->usb_present = usb_present;
+		//printk("xiehong add usb out!\n");
+		usb_state = 0;
 		handle_usb_removal(chip);
 	}
 

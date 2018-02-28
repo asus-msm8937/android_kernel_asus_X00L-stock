@@ -110,13 +110,28 @@
 };
 
 &mdss_dsi0 {
-	qcom,dsi-pref-prim-pan = <&dsi_hx8394f_720p_video>;
+	qcom,dsi-pref-prim-pan = <&dsi_hx8394f_holitech_video>;
+	qcom,dsi-pref-sub-pan = <&dsi_ili9881c_txd_720p_video>;
+	qcom,dsi-pref-third-pan = <&dsi_ili9881c_djn_720p_video>;
 	pinctrl-names = "mdss_default", "mdss_sleep";
 	pinctrl-0 = <&mdss_dsi_active &mdss_te_active>;
 	pinctrl-1 = <&mdss_dsi_suspend &mdss_te_suspend>;
 
 	qcom,platform-te-gpio = <&tlmm 24 0>;
 	qcom,platform-reset-gpio = <&tlmm 60 0>;
+	qcom,regulator-ldo-mode;
+	qcom,platform-regulator-settings = [00 01 01 00 20 07 00];
+	lab-supply = <&lab_regulator>;
+	ibb-supply = <&ibb_regulator>;
+};
+
+&labibb {
+	status = "ok";
+	qpnp,qpnp-labibb-mode = "lcd";
+};
+
+&ibb_regulator {
+	qcom,qpnp-ibb-discharge-resistor = <32>;
 };
 
 &pmi_haptic {
@@ -133,8 +148,21 @@
 	status = "disabled";
 };
 
-&dsi_hx8394f_720p_video {
-	qcom,esd-check-enabled;
+&dsi_ili9881c_djn_720p_video {
+	//qcom,esd-check-enabled;
+	qcom,cont-splash-enabled;
+	qcom,panel-supply-entries = <&dsi_panel_pwr_supply>;
+};
+
+&dsi_ili9881c_txd_720p_video {
+	//qcom,esd-check-enabled;
+	qcom,cont-splash-enabled;
+	qcom,panel-supply-entries = <&dsi_panel_pwr_supply>;
+};
+
+&dsi_hx8394f_holitech_video {
+	//qcom,esd-check-enabled;
+	qcom,cont-splash-enabled;
 	qcom,panel-supply-entries = <&dsi_panel_pwr_supply>;
 };
 
