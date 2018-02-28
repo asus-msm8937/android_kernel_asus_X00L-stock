@@ -181,7 +181,7 @@
 / {
 	qrd_batterydata: qcom,battery-data {
 		qcom,batt-id-range-pct = <15>;
-		#include "batterydata-qrd-sku2-4v35-2590mah.dtsi"
+		#include "batterydata-guangyu-carina-coslight-4v35-3000mah.dtsi"
 	};
 };
 
@@ -197,8 +197,8 @@
 	qcom,battery-data = <&qrd_batterydata>;
 	qcom,cold-bat-decidegc = <(-100)>;
 	qcom,cool-bat-decidegc = <(-100)>;
-	qcom,hot-bat-decidegc = <550>;
-	qcom,warm-bat-decidegc = <550>;
+	qcom,hot-bat-decidegc = <950>;	//temporary modify by pingao.yang
+	qcom,warm-bat-decidegc = <850>;
 	qcom,bad-battery-detection-enable;
 	qcom,hold-soc-while-full;
 };

@@ -174,13 +174,14 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 
-			qcom,iterm-ma = <100>;
+			qcom,iterm-ma = <150>;
 			qcom,float-voltage-mv = <4200>;
+			qcom,fastchg-current-ma = <950>;//diganyun modify fastchg 950ma
 			qcom,resume-delta-mv = <200>;
 			qcom,chg-inhibit-fg;
 			qcom,rparasitic-uohm = <100000>;
 			qcom,bms-psy-name = "bms";
-			qcom,thermal-mitigation = <1500 700 600 0>;
+			qcom,thermal-mitigation = <1000 700 500 0>;  //modify by pingao.yang
 			qcom,parallel-usb-min-current-ma = <1400>;
 			qcom,parallel-usb-9v-min-current-ma = <900>;
 			qcom,parallel-allowed-lowering-ma = <500>;
@@ -188,6 +189,14 @@
 			qcom,force-aicl-rerun;
 			qcom,aicl-rerun-period-s = <180>;
 			qcom,autoadjust-vfloat;
+
+		/*[PLATFORM]-Add-BEGIN by pingao.yang, 2017/04/11, add adc channel*/
+			qcom,camera_therm-vadc = <&pmi8937_vadc>;
+			qcom,vbus_therm-vadc = <&pm8937_vadc>;
+			qcom,board_temp-vadc = <&pm8937_vadc>;
+			qcom,usbchg_temp-channel-id = <17>;
+			qcom,board_temp-channel-id = <19>;
+		/* [PLATFORM]-Mod-END by pingao.yang */
 
 			qcom,chgr@1000 {
 				reg = <0x1000 0x100>;
@@ -289,16 +298,17 @@
 			compatible = "qcom,qpnp-fg";
 			#address-cells = <1>;
 			#size-cells = <1>;
-			qcom,resume-soc = <95>;
+			qcom,resume-soc = <98>;
 			status = "okay";
 			qcom,bcl-lm-threshold-ma = <127>;
 			qcom,bcl-mh-threshold-ma = <405>;
 			qcom,fg-iterm-ma = <150>;
-			qcom,fg-chg-iterm-ma = <100>;
+			qcom,fg-chg-iterm-ma = <130>;
 			qcom,pmic-revid = <&pmi8937_revid>;
-			qcom,fg-cutoff-voltage-mv = <3500>;
+			qcom,fg-cutoff-voltage-mv = <3320>;
 			qcom,cycle-counter-en;
 			qcom,capacity-learning-on;
+			qcom,thermal-coefficients = [c8 86 c1 50 d3 37]; //add by pingao.yang
 
 			qcom,fg-soc@4000 {
 			status = "okay";
