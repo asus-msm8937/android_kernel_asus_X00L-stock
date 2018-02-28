@@ -3494,6 +3494,7 @@ static int msm_otg_pmic_dp_dm(struct msm_otg *motg, int value)
 	return ret;
 }
 
+extern bool get_usb_alert_status(void);	//add by pingao.yang, 2017/08/17, pr-261203
 static int otg_power_get_property_usb(struct power_supply *psy,
 				  enum power_supply_property psp,
 				  union power_supply_propval *val)
@@ -3523,7 +3524,12 @@ static int otg_power_get_property_usb(struct power_supply *psy,
 		break;
 	/* Reflect USB enumeration */
 	case POWER_SUPPLY_PROP_ONLINE:
-		val->intval = motg->online;
+	/*[BUG]-Add-BEGIN by pingao.yang, 2017/08/17, pr-261203, add usb alert function */
+		if (get_usb_alert_status() == true)
+			val->intval = false;
+		else
+			val->intval = motg->online;
+	/* [PLATFORM]-Mod-END by pingao.yang */
 		break;
 	case POWER_SUPPLY_PROP_TYPE:
 		val->intval = psy->type;

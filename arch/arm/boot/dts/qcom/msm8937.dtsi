@@ -362,7 +362,7 @@
 
 		sensor_information12: qcom,sensor-information-12 {
 			qcom,sensor-type = "adc";
-			qcom,sensor-name = "pa_therm1";
+			qcom,sensor-name = "vbus_therm";	//modify by pingao.yang
 		};
 
 		sensor_information13: qcom,sensor-information-13 {
@@ -436,6 +436,7 @@
 		qcom,freq-mitigation-temp = <105>;
 		qcom,freq-mitigation-temp-hysteresis = <15>;
 		qcom,freq-mitigation-value = <400000>;
+		qcom,therm-reset-temp = <115>;
 		qcom,online-hotplug-core;
 		qcom,synchronous-cluster-id = <0 1>;
 		qcom,synchronous-cluster-map = <1 4 &CPU0 &CPU1 &CPU2 &CPU3>,
@@ -1145,6 +1146,7 @@
 		qcom,phy-dvdd-always-on;
 		qcom,boost-sysclk-with-streaming;
 		qcom,axi-prefetch-enable;
+		qcom,floated-charger-enable = <1>;	/*[PLATFORM]-Add-BEGIN by pingao.yang, 2016/01/17, support floated charger */
 		qcom,enable-sdp-typec-current-limit;
 		qcom,hsusb-otg-delay-lpm;
 
