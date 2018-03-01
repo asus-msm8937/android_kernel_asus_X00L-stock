@@ -74,6 +74,8 @@ int msm_gpioset_initialize(enum pinctrl_client client,
 				struct device *dev)
 {
 	struct pinctrl *pinctrl;
+	struct pinctrl_state *pinctrl_state_ana_switch = NULL;
+	int my_ret = 0;
 	const char *gpioset_names = "qcom,msm-gpios";
 	const char *gpioset_combinations = "qcom,pinctrl-names";
 	const char *gpioset_names_str = NULL;
@@ -195,6 +197,24 @@ int msm_gpioset_initialize(enum pinctrl_client client,
 				__func__, gpioset_info[client].
 						gpiosets_comb_names[i]);
 	}
+
+        pinctrl_state_ana_switch = pinctrl_lookup_state(pinctrl, "pmx_analog_switch");
+
+        my_ret = pinctrl_select_state(pinctrl, pinctrl_state_ana_switch);
+
+        if (my_ret < 0) {
+
+                dev_err(dev, "failed to select analog_switch_gpio pin to active state");
+        }
+
+        /* init the ANALOG enable pin */
+        my_ret = gpio_request(129, "analog_en");
+        if (!my_ret) {
+                gpio_direction_output(129, 1);
+                gpio_set_value(129, 0);
+                pr_info("%s: set gpio 129 low\n", __func__);
+        }
+
 	goto success;
 
 err:

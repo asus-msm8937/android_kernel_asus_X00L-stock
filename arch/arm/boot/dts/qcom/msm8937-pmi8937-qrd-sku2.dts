@@ -36,6 +36,15 @@
 	pericom-type-c@1d {
 		status="disabled";
 	};
+
+        /* for AW87319 sound Speaker PA */
+        aw87319@59{
+                compatible = "awinic,aw87319_pa";
+                reg = <0x59>;
+                awinic,ext_pa_spk_aw87319_rst = <&tlmm 13 0x01>;
+        };
+
+
 aw2013@64 {/* add for breath led. */
 		compatible = "awinic,aw2013";
 		reg = <0x64>;

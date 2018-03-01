@@ -26,3 +26,13 @@
 &int_codec {
 	qcom,model = "msm8917-sku5-snd-card";
 };
+
+&i2c_2 {
+	/* for AW87319 sound Speaker PA */
+	aw87319@59{
+		compatible = "awinic,aw87319_pa";
+		reg = <0x59>;
+		awinic,ext_pa_spk_aw87319_rst = <&tlmm 13 0x01>;
+	};
+
+};

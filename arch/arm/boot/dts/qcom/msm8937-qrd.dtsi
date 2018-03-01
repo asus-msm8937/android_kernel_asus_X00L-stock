@@ -46,9 +46,11 @@
 		"pri_i2s_act";
 	pinctrl-names =
 		"all_off",
-		"pri_i2s_act";
+		"pri_i2s_act",
+		"pmx_analog_switch";
 	pinctrl-0 = <&cdc_pdm_lines_sus &cdc_pdm_lines_2_sus>;
 	pinctrl-1 = <&cdc_pdm_lines_act &cdc_pdm_lines_2_act>;
+	pinctrl-2 = <&analog_switch_active>;
 	qcom,cdc-us-euro-gpios;
 	qcom,msm-hs-micbias-type = "internal";
 	qcom,audio-routing =
