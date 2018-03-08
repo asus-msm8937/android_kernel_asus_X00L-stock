@@ -535,7 +535,7 @@
 			qcom,headroom-sense-ch1-enabled;
 			qcom,pmic-revid = <&pmi8937_revid>;
 
-			pmi8937_flash0: qcom,flash_0 {
+			pmi8937_flash0: qcom,flash@0 {
 				label = "flash";
 				qcom,led-name = "led:flash_0";
 				qcom,default-led-trigger =
@@ -543,10 +543,10 @@
 				qcom,max-current = <1000>;
 				qcom,duration = <1280>;
 				qcom,id = <0>;
-				qcom,current = <625>;
+				qcom,current = <1000>;
 			};
 
-			pmi8937_flash1: qcom,flash_1 {
+			pmi8937_flash1: qcom,flash@1 {
 				label = "flash";
 				qcom,led-name = "led:flash_1";
 				qcom,default-led-trigger =
@@ -554,10 +554,10 @@
 				qcom,max-current = <1000>;
 				qcom,duration = <1280>;
 				qcom,id = <1>;
-				qcom,current = <625>;
+				qcom,current = <20>;
 			};
 
-			pmi8937_torch0: qcom,torch_0 {
+			pmi8937_torch0: qcom,torch@0 {
 				label = "torch";
 				qcom,led-name = "led:torch_0";
 				qcom,default-led-trigger =
@@ -567,21 +567,35 @@
 				qcom,current = <120>;
 			};
 
-			pmi8937_torch1: qcom,torch_1 {
+			pmi8937_torch1: qcom,torch@1 {
 				label = "torch";
 				qcom,led-name = "led:torch_1";
 				qcom,default-led-trigger =
 						"torch1_trigger";
 				qcom,max-current = <200>;
 				qcom,id = <1>;
-				qcom,current = <120>;
+				qcom,current = <20>;
 			};
 
-			pmi8937_switch: qcom,switch {
+			pmi8937_switch0: qcom,switch@0 {
 				label = "switch";
-				qcom,led-name = "led:switch";
+				qcom,led-name = "led:switch_0";
 				qcom,default-led-trigger =
-						"switch_trigger";
+						"switch0_trigger";
+				qcom,max-current = <1000>;
+				qcom,duration = <1280>;
+				qcom,id = <2>;
+				qcom,current = <625>;
+				reg0 {
+					regulator-name = "pon_spare_reg";
+				};
+			};
+
+			pmi8937_switch1: qcom,switch@1 {
+				label = "switch";
+				qcom,led-name = "led:switch_1";
+				qcom,default-led-trigger =
+						"switch1_trigger";
 				qcom,max-current = <1000>;
 				qcom,duration = <1280>;
 				qcom,id = <2>;
