@@ -847,6 +847,21 @@
 			};
 		};
 
+                /* for AW87319 sound Speaker PA */
+                audio_analog_switch {
+                        analog_switch_active: analog_switch_active {
+                                mux {
+                                        pins = "gpio129";
+                                        function = "gpio";
+                                };
+                                config {
+                                        pins = "gpio129";
+                                        drive-strength = <2>;
+                                        bias-pull-up;
+                                };
+                        };
+                };
+
 		cross-conn-det {
 			cross_conn_det_act: lines_on {
 				mux {
