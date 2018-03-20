@@ -27,7 +27,16 @@
 	qcom,model = "msm8917-sku5-snd-card";
 };
 
+&usb_otg {
+	qcom,hsusb-otg-phy-init-seq =
+		<0x39 0x81 0x37 0x82 0xffffffff>;
+};
 &i2c_2 {
+
+	pericom-type-c@1d {
+		status="disabled";
+	};
+
 	/* for AW87319 sound Speaker PA */
 	aw87319@59{
 		compatible = "awinic,aw87319_pa";
@@ -35,4 +44,32 @@
 		awinic,ext_pa_spk_aw87319_rst = <&tlmm 13 0x01>;
 	};
 
+	aw2013@64 {/* add for breath led. */
+		compatible = "awinic,aw2013";
+		reg = <0x64>;
+		//vdd-supply = <&pm8937_l17>;
+		//vcc-supply = <&pm8937_l5>;
+
+		aw2013,red {
+			aw2013,name = "red";
+			aw2013,id = <0>;
+			aw2013,max-brightness = <255>;
+			aw2013,max-current = <1>;
+			aw2013,rise-time-ms = <2>;
+			aw2013,hold-time-ms = <1>;
+			aw2013,fall-time-ms = <2>;
+			aw2013,off-time-ms = <1>;
+		};
+
+		aw2013,green {
+			aw2013,name = "green";
+			aw2013,id = <1>;
+			aw2013,max-brightness = <255>;
+			aw2013,max-current = <1>;
+			aw2013,rise-time-ms = <2>;
+			aw2013,hold-time-ms = <1>;
+			aw2013,fall-time-ms = <2>;
+			aw2013,off-time-ms = <1>;
+		};
+	};
 };

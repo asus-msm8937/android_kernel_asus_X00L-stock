@@ -1203,7 +1203,7 @@
 				/* suspended state */
 				mux {
 					pins = "gpio6", "gpio7";
-					function = "gpio";
+					function = "blsp_i2c2";//bug 268672,267084 modify by diganyun 2017/07/02 use correct function
 				};
 
 				config {

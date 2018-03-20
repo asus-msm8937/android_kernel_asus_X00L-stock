@@ -113,6 +113,7 @@
 
 &spmi_bus {
 	qcom,pmi8937@2 {
+		/* use aw2015 rgb led no need orignal ledS
 		qcom,leds@a100 {
 			status = "okay";
 			qcom,led_mpp_2 {
@@ -128,6 +129,7 @@
 				qcom,mode-ctrl = <0x60>;
 			};
 		};
+		*/
 	};
 };
 
@@ -170,7 +172,8 @@
 / {
 	qrd_batterydata: qcom,battery-data {
 		qcom,batt-id-range-pct = <15>;
-		#include "batterydata-qrd-sku2-4v35-2590mah.dtsi"
+		//#include "batterydata-qrd-sku2-4v35-2590mah.dtsi"
+		#include "batterydata-guangyu-carina-coslight-4v35-3000mah.dtsi"
 	};
 };
 
@@ -186,8 +189,8 @@
 	qcom,battery-data = <&qrd_batterydata>;
 	qcom,cold-bat-decidegc = <(-100)>;
 	qcom,cool-bat-decidegc = <(-100)>;
-	qcom,hot-bat-decidegc = <550>;
-	qcom,warm-bat-decidegc = <550>;
+	qcom,hot-bat-decidegc = <950>;
+	qcom,warm-bat-decidegc = <850>;
 	qcom,bad-battery-detection-enable;
 	qcom,hold-soc-while-full;
 };

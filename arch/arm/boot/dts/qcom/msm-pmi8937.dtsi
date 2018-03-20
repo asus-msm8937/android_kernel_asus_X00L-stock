@@ -117,6 +117,20 @@
 				qcom,fast-avg-setup = <0>;
 			};
 
+			/*[PLATFORM]-Add-BEGIN by pingao.yang, 2017/02/23, add adc @10 channel*/
+			chan@10 {
+				label = "camera_therm";
+				reg = <0x10>;
+				qcom,decimation = <0>;
+				qcom,pre-div-channel-scaling = <0>;
+				qcom,calibration-type = "ratiometric";
+				qcom,scale-function = <2>;
+				qcom,hw-settle-time = <2>;
+				qcom,fast-avg-setup = <0>;
+				qcom,vadc-thermal-node;
+			};
+			/* [PLATFORM]-Mod-END by pingao.yang */
+
 			chan@43 {
 				label = "usb_dp";
 				reg = <0x43>;
@@ -150,9 +164,16 @@
 			label = "pmi8937-mpp";
 
 			mpp@a000 {
+			/*[PLATFORM]-Add-BEGIN by pingao.yang, 2017/02/23, config MPP1 to adc channel*/
+				/* MPP1 - CAMERA THERMAL config */
 				reg = <0xa000 0x100>;
 				qcom,pin-num = <1>;
-				status = "disabled";
+				qcom,mode = <4>; /* AIN input */
+				qcom,invert = <1>; /* Enable MPP */
+				qcom,ain-route = <0>; /* AMUX 5 */
+				qcom,master-en = <1>;
+				qcom,src-sel = <0>; /* Function constant */
+			/* [PLATFORM]-Mod-END by pingao.yang */
 			};
 
 			mpp@a100 {
