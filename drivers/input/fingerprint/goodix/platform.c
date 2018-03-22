@@ -19,7 +19,6 @@
 int gf_parse_dts(struct gf_dev* gf_dev)
 {
     int rc = 0;
-
     /*get pwr resource*/
     gf_dev->pwr_gpio = of_get_named_gpio(gf_dev->spi->dev.of_node,"goodix,gpio_pwr",0);
     if(!gpio_is_valid(gf_dev->pwr_gpio)) {
@@ -31,7 +30,7 @@ int gf_parse_dts(struct gf_dev* gf_dev)
         dev_err(&gf_dev->spi->dev, "Failed to request PWR GPIO. rc = %d\n", rc);
         return -1;
     }
-    
+
     /*get reset resource*/
     gf_dev->reset_gpio = of_get_named_gpio(gf_dev->spi->dev.of_node,"goodix,gpio_reset",0);
     if(!gpio_is_valid(gf_dev->reset_gpio)) {
@@ -44,7 +43,7 @@ int gf_parse_dts(struct gf_dev* gf_dev)
         return -1;
     }
     gpio_direction_output(gf_dev->reset_gpio, 1);
-    
+
     /*get irq resourece*/
     gf_dev->irq_gpio = of_get_named_gpio(gf_dev->spi->dev.of_node,"goodix,gpio_irq",0);
     pr_info("gf:irq_gpio:%d\n", gf_dev->irq_gpio);
@@ -52,6 +51,7 @@ int gf_parse_dts(struct gf_dev* gf_dev)
         pr_info("IRQ GPIO is invalid.\n");
         return -1;
     }
+
     rc = gpio_request(gf_dev->irq_gpio, "goodix_irq");
     if(rc) {
         dev_err(&gf_dev->spi->dev, "Failed to request IRQ GPIO. rc = %d\n", rc);
