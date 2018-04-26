@@ -1107,6 +1107,21 @@
 				};
 			};
 		};
+		/* add by dingjiayu for cardTray check*/
+		cardTray_gpio67{
+			cardtray_gpio67_active: cardtray_gpio67_active{
+				mux {
+					pins = "gpio67";
+					function = "gpio";
+				};
+				config {
+					pins = "gpio67";
+					bias-pull-down; /* pull up */
+					drive-strength = <8>; /* 2 MA */
+					input-enable;
+				};
+			};
+		};
 		/* WSA VI sense */
 		wsa-vi {
 			wsa_vi_on: wsa_vi_on {

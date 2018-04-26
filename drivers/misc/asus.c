@@ -13,7 +13,7 @@
 
 
 extern int get_io_value(void);
-
+extern int get_cardTray_State(void);//add by jiayu for cardTray check
 static int gpiostatus_proc_show(struct seq_file *m, void *v)
 {
 	int temp =0;
@@ -30,7 +30,7 @@ static int sdtray_proc_show(struct seq_file *m, void *v)
 	int cardTray_state = 0;
 	
 	
-
+	cardTray_state = get_cardTray_State();
 	if( cardTray_state < 0 )
 	{
 		seq_printf(m, "-1");
