@@ -25,7 +25,7 @@
 #include "bus.h"
 #include "mmc_ops.h"
 #include "sd_ops.h"
-
+extern char EMMC_info[40];  //mmc dev_info
 static const unsigned int tran_exp[] = {
 	10000,		100000,		1000000,	10000000,
 	0,		0,		0,		0
@@ -110,7 +110,35 @@ static int mmc_decode_cid(struct mmc_card *card)
 			mmc_hostname(card->host), card->csd.mmca_vsn);
 		return -EINVAL;
 	}
-
+//start: add emmc hardware infomation, by chenjindong, 2017/01/16
+    switch(card->cid.manfid)
+    {
+		case 0x15:
+			if((0x52 == card->cid.prod_name[0])&& (0x58 == card->cid.prod_name[1]))
+				strcpy(EMMC_info, "KMRX1000BM-B614");
+			else if((0x52 == card->cid.prod_name[0]) && (0x43 == card->cid.prod_name[1]))
+				strcpy(EMMC_info, "KMRC10014M_B809");
+			else
+				strcpy(EMMC_info, "Unknown device");
+			//strncat(emmc_info, card->cid.prod_name, strlen(card->cid.prod_name));
+			break;
+		case 0x90:
+			if((0x48 == card->cid.prod_name[0])&& (0x41 == card->cid.prod_name[1]))
+				strcpy(EMMC_info, "H9TQ17ABJTBCUR-KUM");
+			else if((0x48 == card->cid.prod_name[0]) && (0x42 == card->cid.prod_name[1]))
+				strcpy(EMMC_info, "H9TQ26ADFTBCUR");
+			else if((0x48 == card->cid.prod_name[0]) && (0x43 == card->cid.prod_name[1]))
+				strcpy(EMMC_info, "H9TQ52ACLTMCUR");
+			else
+				strcpy(EMMC_info, "Unknown device");
+			//strncat(emmc_info, card->cid.prod_name, strlen(card->cid.prod_name));
+			break;
+		default:
+			strcpy(EMMC_info, "Unknown device");
+			break;
+    }
+    //End: add emmc hardware infomation, by chenjindong, 2017/01/16
+	strncat(card->emcp_info, EMMC_info, strlen(EMMC_info));
 	return 0;
 }
 
@@ -813,6 +841,7 @@ MMC_DEV_ATTR(manfid, "0x%06x\n", card->cid.manfid);
 MMC_DEV_ATTR(name, "%s\n", card->cid.prod_name);
 MMC_DEV_ATTR(oemid, "0x%04x\n", card->cid.oemid);
 MMC_DEV_ATTR(prv, "0x%x\n", card->cid.prv);
+MMC_DEV_ATTR(emcp_info, "%s\n", card->emcp_info);
 MMC_DEV_ATTR(rev, "0x%x\n", card->ext_csd.rev);
 MMC_DEV_ATTR(pre_eol_info, "%02x\n", card->ext_csd.pre_eol_info);
 MMC_DEV_ATTR(life_time, "0x%02x 0x%02x\n",
@@ -840,6 +869,7 @@ static struct attribute *mmc_std_attrs[] = {
 	&dev_attr_name.attr,
 	&dev_attr_oemid.attr,
 	&dev_attr_prv.attr,
+	&dev_attr_emcp_info.attr,
 	&dev_attr_rev.attr,
 	&dev_attr_pre_eol_info.attr,
 	&dev_attr_life_time.attr,
