@@ -37,6 +37,8 @@
 #define XO_CLK_RATE	19200000
 #define CMDLINE_DSI_CTL_NUM_STRING_LEN 2
 
+extern char Lcd_info[64];
+
 /* Master structure to hold all the information about the DSI/panel */
 static struct mdss_dsi_data *mdss_dsi_res;
 
@@ -1400,6 +1402,27 @@ static int mdss_dsi_update_panel_config(struct mdss_dsi_ctrl_pdata *ctrl_pdata,
 			pinfo->mipi.pixel_packing, &(pinfo->mipi.dst_format));
 	return ret;
 }
+
+//Start:Reqxxx,liuyang3.wt,ADD,20160314,add hardware info for factory mode.
+void  process_lcd_info(char *lcm_info, const char *panel_name)
+{
+    char* prefix = "qcom,mdss_dsi_";
+    int plen ,strl =0;
+    plen = strlen(prefix);
+    strl = strlen(panel_name); 
+	
+    if(strl>plen)
+    {
+    	//memset(lcm_info, 0, sizeof(lcm_info));
+    	strncpy(lcm_info,panel_name+plen,strl-plen); 
+	lcm_info[strl-plen] = '\0';
+    }
+
+	pr_info("%s: lcd_info = %s\n",__func__,lcm_info);
+	return;
+ }
+//End:Reqxxx,liuyang3.wt,ADD,20160314,add hardware info for factory mode.
+
 
 int mdss_dsi_on(struct mdss_panel_data *pdata)
 {
@@ -2830,6 +2853,7 @@ static struct device_node *mdss_dsi_find_panel_of_node(
 	int len, i = 0;
 	int ctrl_id = pdev->id - 1;
 	char panel_name[MDSS_MAX_PANEL_LEN] = "";
+	char lcm_info[64] = "0";
 	char ctrl_id_stream[3] =  "0:";
 	char *str1 = NULL, *str2 = NULL, *override_cfg = NULL;
 	char cfg_np_name[MDSS_MAX_PANEL_LEN] = "";
@@ -2927,6 +2951,11 @@ static struct device_node *mdss_dsi_find_panel_of_node(
 			}
 		}
 
+	//Start:Reqxxx,liuyang3.wt,ADD,20160314,add hardware info for factory mode.	
+		process_lcd_info(lcm_info, panel_name);
+		pr_info("[LCD] lcm_info  %s\n", lcm_info);
+		strcpy(Lcd_info,lcm_info);
+	//end:Reqxxx,liuyang3.wt,ADD,20160314,add hardware info for factory mode.		
 		return dsi_pan_node;
 	}
 end:
