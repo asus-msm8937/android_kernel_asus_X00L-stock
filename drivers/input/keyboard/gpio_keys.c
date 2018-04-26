@@ -728,7 +728,12 @@ gpio_keys_get_devtree_pdata(struct device *dev)
 }
 
 #endif
-
+//begin add by jindong read GPIO (92 93 94 95)to distinguish HW config at 20170215
+	int G_02 = 0;
+	int G_03 = 0;
+	int G_04 = 0;
+	int G_05 = 0;
+//end add by jindong read GPIO (92 93 94 95)to distinguish HW config at 20170215
 static int gpio_keys_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -739,7 +744,15 @@ static int gpio_keys_probe(struct platform_device *pdev)
 	int i, error;
 	int wakeup = 0;
 	struct pinctrl_state *set_state;
+	/**************************chenjindong get gpio value*************************************/
 
+	struct pinctrl_state *rf_config92;  //add by jindong for HW require
+	struct pinctrl_state *rf_config93;  //add by jindong for HW require
+	struct pinctrl_state *rf_config94;  //add by jindong for HW require
+	struct pinctrl_state *rf_config95;  //add by jindong for HW require
+	int ret = 0;
+
+	/**************************chenjindong get gpio value***********************************/
 	if (!pdata) {
 		pdata = gpio_keys_get_devtree_pdata(dev);
 		if (IS_ERR(pdata))
@@ -800,6 +813,52 @@ static int gpio_keys_probe(struct platform_device *pdev)
 			return error;
 		}
 	}
+/*****************begin add by chenjindong read GPIO (92 93 94 95)to distinguish HW config at 20170215**************/
+	rf_config92 = pinctrl_lookup_state(ddata->key_pinctrl, "pmx_rf_read_gpio92");
+	ret = pinctrl_select_state(ddata->key_pinctrl, rf_config92);
+	if (ret < 0) {
+		dev_err(dev, " chenjindong failed to select analog_switch_gpio pin to active state");
+	}
+	ret = gpio_request(92, "rf_GPIO2");
+	if (!ret) {
+		gpio_direction_input(92);
+		G_02 = gpio_get_value(92);
+		dev_err(dev,"chenjindong get gpio 92 %d: \n", G_02);
+	}
+	rf_config93 = pinctrl_lookup_state(ddata->key_pinctrl, "pmx_rf_read_gpio93");
+	ret = pinctrl_select_state(ddata->key_pinctrl, rf_config93);
+	if (ret < 0) {
+		dev_err(dev, " jindong failed to select analog_switch_gpio pin to active state");
+	}
+	ret = gpio_request(93, "rf_GPIO3");
+	if (!ret) {
+		gpio_direction_input(93);
+		G_03 = gpio_get_value(93);
+		dev_err(dev,"chenjindong get gpio 93 %d: \n", G_03);
+	}
+	rf_config94 = pinctrl_lookup_state(ddata->key_pinctrl, "pmx_rf_read_gpio94");
+	ret = pinctrl_select_state(ddata->key_pinctrl, rf_config94);
+	if (ret < 0) {
+		dev_err(dev, " jindong failed to select analog_switch_gpio pin to active state");
+	}
+	ret = gpio_request(94, "rf_GPIO4");
+	if (!ret) {
+		gpio_direction_input(94);
+		G_04 = gpio_get_value(94);
+		dev_err(dev,"jindong get gpio 94 %d: \n", G_04);
+	}
+	rf_config95 = pinctrl_lookup_state(ddata->key_pinctrl, "pmx_rf_read_gpio95");
+	ret = pinctrl_select_state(ddata->key_pinctrl, rf_config95);
+	if (ret < 0) {
+		dev_err(dev, " jindong failed to select analog_switch_gpio pin to active state");
+	}
+	ret = gpio_request(95, "rf_GPIO5");
+	if (!ret) {
+		gpio_direction_input(95);
+		G_05 = gpio_get_value(95);
+		dev_err(dev,"jindong get gpio 95 %d: \n", G_05);
+	}
+/**********end add by jindong read GPIO (104 105 106 109)to distinguish HW config at 20170215 **********/
 
 	for (i = 0; i < pdata->nbuttons; i++) {
 		const struct gpio_keys_button *button = &pdata->buttons[i];
@@ -852,6 +911,14 @@ err_setup_key:
 
 	return error;
 }
+  int tempj = 0 ;
+int get_io_value(void)
+{
+     tempj =G_02<<3|G_03<<2|G_04<<1|G_05 ;
+	return tempj;
+
+}
+EXPORT_SYMBOL(get_io_value);
 
 static int gpio_keys_remove(struct platform_device *pdev)
 {
