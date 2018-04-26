@@ -891,6 +891,132 @@
 			};
 		};
 
+		pmx_rf_read_gpio92{
+			rf_read_gpio92_active: rf_read_gpio92_active{
+				mux {
+					pins = "gpio92";
+					function = "gpio";
+				};
+
+				config {
+					pins = "gpio92";
+					bias-pull-up; /* pull up */
+					drive-strength = <8>; /* 2 MA */
+					input-enable;
+				};
+			};
+			rf_read_gpio92_sus:rf_read_gpio92_sus{
+				mux {
+					pins = "gpio92";
+					function = "gpio";
+				};
+
+				config {
+					pins = "gpio92";
+					bias-pull-up; /* pull up */
+					drive-strength = <8>; /* 2 MA */
+					input-enable;
+				};
+			};
+		};
+		pmx_rf_read_gpio93{
+			rf_read_gpio93_active: rf_read_gpio93_active{
+				mux {
+					pins = "gpio93";
+					function = "gpio";
+				};
+
+				config {
+					pins = "gpio93";
+					bias-pull-up; /* pull up */
+					drive-strength = <8>; /* 8 MA */
+					input-enable;
+				};
+			};
+			rf_read_gpio93_sus:rf_read_gpio93_sus{
+				mux {
+					pins = "gpio93";
+					function = "gpio";
+				};
+
+				config {
+					pins = "gpio93";
+					bias-pull-up; /* pull up */
+					drive-strength = <8>; /* 8 MA */
+					input-enable;
+				};
+			};
+		};
+		pmx_rf_read_gpio94{
+			rf_read_gpio94_active: rf_read_gpio94_active{
+				mux {
+					pins = "gpio94";
+					function = "gpio";
+				};
+
+				config {
+					pins = "gpio94";
+					bias-pull-up; /* pull up */
+					drive-strength = <8>; /* 8 MA */
+					input-enable;
+				};
+			};
+			rf_read_gpio94_sus:rf_read_gpio94_sus{
+				mux {
+					pins = "gpio94";
+					function = "gpio";
+				};
+
+				config {
+					pins = "gpio94";
+					bias-pull-up; /* pull up */
+					drive-strength = <8>; /* 8 MA */
+					input-enable;
+				};
+			};
+		};
+		pmx_rf_read_gpio95{
+			rf_read_gpio95_active: rf_read_gpio95_active{
+				mux {
+					pins = "gpio95";
+					function = "gpio";
+				};
+				config {
+					pins = "gpio95";
+					bias-pull-up; /* pull up */
+					drive-strength = <8>; /* 8 MA */
+					input-enable;
+				};
+			};
+			rf_read_gpio95_sus:rf_read_gpio95_sus{
+				mux {
+					pins = "gpio95";
+					function = "gpio";
+				};
+
+				config {
+					pins = "gpio95";
+					bias-pull-up; /* pull up */
+					drive-strength = <8>; /* 8 MA */
+					input-enable;
+				};
+			};
+		};
+		/* add by dingjiayu for cardTray check*/
+		cardTray_gpio67{
+			cardtray_gpio67_active: cardtray_gpio67_active{
+				mux {
+					pins = "gpio67";
+					function = "gpio";
+				};
+				config {
+					pins = "gpio67";
+					bias-pull-down; /* pull up */
+					drive-strength = <8>; /* 2 MA */
+					input-enable;
+				};
+			};
+		};
 		/* WSA VI sense */
 		wsa-vi {
 			wsa_vi_on: wsa_vi_on {
