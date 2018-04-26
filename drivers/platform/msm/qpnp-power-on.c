@@ -30,6 +30,12 @@
 #include <linux/regulator/of_regulator.h>
 #include <linux/qpnp/power-on.h>
 
+#include <linux/proc_fs.h>
+#include <linux/string.h>
+#include <asm/uaccess.h>
+
+#define POWER_KEY_NODE		"driver/power_key_feature"
+
 #define CREATE_MASK(NUM_BITS, POS) \
 	((unsigned char) (((1 << (NUM_BITS)) - 1) << (POS)))
 #define PON_MASK(MSB_BIT, LSB_BIT) \
@@ -1272,6 +1278,127 @@ qpnp_pon_config_input(struct qpnp_pon *pon,  struct qpnp_pon_config *cfg)
 	return 0;
 }
 
+#ifdef POWER_KEY_NODE
+static int qpnp_pon_power_key_read(struct qpnp_pon *pon, int *value) {
+	int rc = 0, i = 0;
+	u16 addr[4];
+	u8 reg;
+
+	addr[0] = QPNP_PON_KPDPWR_S1_TIMER(pon);
+	addr[1] = QPNP_PON_KPDPWR_S2_TIMER(pon);
+	addr[2] = QPNP_PON_KPDPWR_S2_CNTL(pon);
+	addr[3] = QPNP_PON_KPDPWR_S2_CNTL2(pon);
+
+	for (i = 0; i < 4; i++) {
+		reg = 0;
+		rc = spmi_ext_register_readl(pon->spmi->ctrl, pon->spmi->sid, addr[i], &reg, 1);
+		if (rc) {
+			dev_err(&pon->spmi->dev, "Unable to read from addr=%hx, rc(%d)\n", addr[i], rc);
+			return rc;
+		}
+		value[i] = reg;
+
+		printk("wangs: <%s> 0x%x -> %02X \n", __func__, addr[i], value[i]);
+	}
+
+	return rc;
+}
+
+static ssize_t power_key_feature_read(struct file *file, char __user * page, size_t size, loff_t * ppos)
+{
+	struct qpnp_pon *pon = sys_reset_dev;
+	int rc = 0;
+	int value[4];
+	char buf[50] = {0};
+
+	printk("wangs: <%s> begin...\n", __func__);
+
+	if (!pon)
+		return -EPROBE_DEFER;
+
+	printk("=========================================<%s>\n", __func__);
+	rc = qpnp_pon_power_key_read(pon, value);
+	if (rc) {
+		dev_err(&pon->spmi->dev, "<%s> Unable to read\n", __func__);
+		return rc;
+	}
+	printk("=========================================\n");
+
+	snprintf(buf, 50, "0x840 - %02X %02X %02X %02X\n", value[0], value[1], value[2], value[3]);
+	rc = simple_read_from_buffer(page, size, ppos, buf, strlen(buf));
+
+	return rc;
+}
+
+static ssize_t power_key_feature_write(struct file *filp, const char __user * buff, size_t len, loff_t * off)
+{
+	struct qpnp_pon *pon = sys_reset_dev;
+	int rc = 0, i = 0;
+	struct qpnp_pon_config *cfg;
+	char  temp[50] = {0};
+
+	rc = copy_from_user(temp, buff, len);
+	if (rc) {
+		printk("<%s> copy_from_user failed.\n", __func__);
+		return -EPERM;
+	}
+	printk("wangs: <%s> temp = '%s'\n", __func__, temp);
+
+	if (!pon)
+		return -EPROBE_DEFER;
+
+	for (i = 0; i < pon->num_pon_config; i++) {
+		cfg = &pon->pon_cfg[i];
+
+		if (cfg->config_reset) {
+			/* Configure the reset-configuration */
+			if (cfg->support_reset) {
+				rc = qpnp_config_reset(pon, cfg);
+				if (rc) {
+					dev_err(&pon->spmi->dev, "Unable to config pon reset\n");
+					return rc;
+				}
+			} else {
+				if (cfg->pon_type != PON_CBLPWR) {
+					/* disable S2 reset */
+					rc = qpnp_pon_masked_write(pon, cfg->s2_cntl2_addr, QPNP_PON_S2_CNTL_EN, 0);
+					if (rc) {
+						dev_err(&pon->spmi->dev, "Unable to disable S2 reset\n");
+						return rc;
+					}
+				}
+			}
+		}
+	}
+
+	return len;
+}
+
+static const struct file_operations power_key_feature_fops = {
+	.owner = THIS_MODULE,
+	.read = power_key_feature_read,
+	.write = power_key_feature_write,
+};
+
+static void power_key_feature_init_node(void) {
+	struct proc_dir_entry *proc_entry = NULL;
+
+	printk("wangs: <%s> begin...\n", __func__);
+
+	proc_entry = proc_create(POWER_KEY_NODE, 0666, NULL, &power_key_feature_fops);
+	if (proc_entry == NULL) {
+		printk("wangs: CAN't create proc entry /proc/%s !", POWER_KEY_NODE);
+		return;
+	} else {
+		printk("wangs: Created proc entry /proc/%s !", POWER_KEY_NODE);
+	}
+}
+
+static void power_key_feature_deinit_node(void) {
+	remove_proc_entry(POWER_KEY_NODE, NULL);
+}
+#endif
+
 static int qpnp_pon_config_init(struct qpnp_pon *pon)
 {
 	int rc = 0, i = 0, pmic_wd_bark_irq;
@@ -1588,6 +1715,7 @@ static int qpnp_pon_config_init(struct qpnp_pon *pon)
 			goto unreg_input_dev;
 		}
 
+#ifndef POWER_KEY_NODE
 		if (cfg->config_reset) {
 			/* Configure the reset-configuration */
 			if (cfg->support_reset) {
@@ -1611,6 +1739,7 @@ static int qpnp_pon_config_init(struct qpnp_pon *pon)
 				}
 			}
 		}
+#endif
 
 		rc = qpnp_pon_request_irqs(pon, cfg);
 		if (rc) {
@@ -2241,6 +2370,10 @@ static int qpnp_pon_probe(struct spmi_device *spmi)
 		return rc;
 	}
 
+#ifdef POWER_KEY_NODE
+	power_key_feature_init_node();
+#endif
+
 	rc = of_property_read_u32(pon->spmi->dev.of_node,
 				"qcom,pon-dbc-delay", &delay);
 	if (rc) {
@@ -2360,6 +2493,10 @@ static int qpnp_pon_remove(struct spmi_device *spmi)
 	unsigned long flags;
 
 	device_remove_file(&spmi->dev, &dev_attr_debounce_us);
+
+#ifdef POWER_KEY_NODE
+	power_key_feature_deinit_node();
+#endif
 
 	cancel_delayed_work_sync(&pon->bark_work);
 
