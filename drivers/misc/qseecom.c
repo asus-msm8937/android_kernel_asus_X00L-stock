@@ -8762,7 +8762,7 @@ static int qseecom_suspend(struct platform_device *pdev, pm_message_t state)
 
 	mutex_unlock(&clk_access_lock);
 	mutex_unlock(&qsee_bw_mutex);
-	cancel_work_sync(&qseecom.bw_inactive_req_ws);
+	//cancel_work_sync(&qseecom.bw_inactive_req_ws);
 
 	return 0;
 }
