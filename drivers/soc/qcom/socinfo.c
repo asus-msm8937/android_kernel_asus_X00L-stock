@@ -35,6 +35,12 @@
 #include <soc/qcom/smem.h>
 #include <soc/qcom/boot_stats.h>
 
+
+#include <linux/fs.h>
+#include <linux/init.h>
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
+
 #define BUILD_ID_LENGTH 32
 #define SMEM_IMAGE_VERSION_BLOCKS_COUNT 32
 #define SMEM_IMAGE_VERSION_SINGLE_BLOCK_SIZE 128
@@ -654,6 +660,31 @@ err_path:
 	return "UNKNOWN SOC TYPE";
 }
 
+//zkx get cpuname for ota update 
+static char *wt_msm_read_hardware_id(void)
+{
+	static char msm_soc_str[256] = "";
+	static bool string_generated;
+	int ret = 0;
+
+	if (string_generated)
+		return msm_soc_str;
+	if (!socinfo)
+		goto err_path;
+	if (!cpu_of_id[socinfo->v0_1.id].soc_id_string)
+		goto err_path;
+
+	ret = strlcat(msm_soc_str, cpu_of_id[socinfo->v0_1.id].soc_id_string,
+			sizeof(msm_soc_str));
+	if (ret > sizeof(msm_soc_str))
+		goto err_path;
+
+	string_generated = true;
+	return msm_soc_str;
+err_path:
+	return "UNKNOWN SOC TYPE";
+}
+//end
 uint32_t socinfo_get_raw_id(void)
 {
 	return socinfo ?
@@ -1591,6 +1622,32 @@ static void socinfo_select_format(void)
 	}
 }
 
+//zkx get cpuname for ota update 
+static int wt_cpuname_show(struct seq_file *seq, void *v)
+{
+	seq_printf(seq, "%s\n", wt_msm_read_hardware_id());
+	return 0;
+}
+
+static int cpuname_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, wt_cpuname_show, NULL);
+}
+
+static const struct file_operations proc_cpuname_operations = {
+	.open		= cpuname_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= seq_release,
+};
+
+static int __init proc_cpuname_init(void)
+{
+	proc_create("cpuname", 0, NULL, &proc_cpuname_operations);
+	return 0;
+}
+//end
+
 int __init socinfo_init(void)
 {
 	static bool socinfo_init_done;
@@ -1619,7 +1676,9 @@ int __init socinfo_init(void)
 	socinfo_print();
 	arch_read_hardware_id = msm_read_hardware_id;
 	socinfo_init_done = true;
-
+	//zkx get cpuname for ota update 
+	proc_cpuname_init();
+	//end
 	return 0;
 }
 subsys_initcall(socinfo_init);
