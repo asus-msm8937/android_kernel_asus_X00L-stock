@@ -141,6 +141,10 @@
 	soc: soc { };
 };
 
+&secure_mem {
+ status = "ok";
+};
+
 #include "msm8917-pinctrl.dtsi"
 #include "msm8917-camera.dtsi"
 #include "msm8917-cpu.dtsi"
