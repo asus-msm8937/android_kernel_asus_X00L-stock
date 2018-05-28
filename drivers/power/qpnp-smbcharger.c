@@ -1024,7 +1024,7 @@ static void read_usb_type(struct smbchg_chip *chip, char **usb_type_name,
 #define CHG_INHIBIT_BIT			BIT(1)
 #define BAT_TCC_REACHED_BIT		BIT(7)
 
-//extern int battery_master_get_capacity_limit_flag(void);
+extern int battery_master_get_capacity_limit_flag(void);
 static int get_prop_batt_status(struct smbchg_chip *chip)
 {
 	int rc, status = POWER_SUPPLY_STATUS_DISCHARGING;
@@ -1048,12 +1048,8 @@ static int get_prop_batt_status(struct smbchg_chip *chip)
 	chg_inhibit = reg & CHG_INHIBIT_BIT;
 	if (chg_inhibit)
 		return POWER_SUPPLY_STATUS_FULL;
-#if 0
-	if (battery_master_get_capacity_limit_flag() && (chip->capacity == 100)) {//bug 266540 modify by diganyun 2017/06/15
-#else
-   	if ( (chip->capacity == 100)) {//bug 266540 modify by diganyun 2017/06/15
 
-#endif
+	if (battery_master_get_capacity_limit_flag() && (chip->capacity == 100)) {//bug 266540 modify by diganyun 2017/06/15
 		smbchg_charging_en(chip, false);
 		return POWER_SUPPLY_STATUS_FULL;
 	}
