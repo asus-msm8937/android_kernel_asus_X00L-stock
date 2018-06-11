@@ -279,10 +279,10 @@
 			chan@11 {
 				label = "vbus_therm";	//modify by pingao.yang
 				reg = <0x11>;
-				qcom,decimation = <0>;
+				qcom,decimation = <2>;
 				qcom,pre-div-channel-scaling = <0>;
 				qcom,calibration-type = "ratiometric";
-				qcom,scale-function = <11>;	//modify by pingao.yang
+				qcom,scale-function = <2>;	//modify by pingao.yang
 				qcom,hw-settle-time = <2>;
 				qcom,fast-avg-setup = <0>;
 				qcom,vadc-thermal-node;
