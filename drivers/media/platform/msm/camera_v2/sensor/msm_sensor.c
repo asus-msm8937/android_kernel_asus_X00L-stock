@@ -237,6 +237,10 @@ static uint16_t msm_sensor_id_by_mask(struct msm_sensor_ctrl_t *s_ctrl,
 	return sensor_id;
 }
 
+
+extern char Camera_F_info[40];
+extern char Camera_B_info[40];
+extern char Camera_F_other_info[40];
 int msm_sensor_match_id(struct msm_sensor_ctrl_t *s_ctrl)
 {
 	int rc = 0;
@@ -271,6 +275,16 @@ int msm_sensor_match_id(struct msm_sensor_ctrl_t *s_ctrl)
 
 	pr_debug("%s: read id: 0x%x expected id 0x%x:\n",
 			__func__, chipid, slave_info->sensor_id);
+	if (0xd855 == chipid) {
+		strcpy(Camera_F_info, "OV13855");
+		strcpy(Camera_B_info, "OV13855");
+	} else if (0x880 == chipid) {
+		strcpy(Camera_F_info, "OV20880_4C");
+	} else if (0x885a == chipid) {
+		strcpy(Camera_F_other_info, "OV8856");
+	} else if (0x6880 == chipid) {
+		strcpy(Camera_B_info, "OV16880");
+	}
 	if (msm_sensor_id_by_mask(s_ctrl, chipid) != slave_info->sensor_id) {
 		pr_err("%s chip id %x does not match %x\n",
 				__func__, chipid, slave_info->sensor_id);
