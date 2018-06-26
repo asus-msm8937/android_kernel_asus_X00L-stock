@@ -346,9 +346,12 @@ static long gf_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 		for(i = 0; i< ARRAY_SIZE(key_map); i++) {
 			if(key_map[i].val == gf_key.key){
-				input_report_key(gf_dev->input, gf_key.key, gf_key.value);
-				input_sync(gf_dev->input);
-				break;
+				if(gf_key.key == KEY_HOME)
+				{
+					input_report_key(gf_dev->input, gf_key.key, gf_key.value);
+					input_sync(gf_dev->input);
+					break;
+				}
 			}
 		}
 
