@@ -181,6 +181,4 @@
 	};
 };
 
-&pm8937_vadc {
-	/delete-node/ chan@11;
-};
+
