@@ -386,6 +386,12 @@
 			qcom,sensor-name = "pm8937_tz";
 			qcom,scaling-factor = <1000>;
 		};
+
+		//add by pingao.yang
+		sensor_information17: qcom,sensor-information-17 {
+			qcom,sensor-type = "adc";
+			qcom,sensor-name = "camera_therm";
+		};
 	};
 
 	mitigation_profile0: qcom,limit_info-0 {
