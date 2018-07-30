@@ -62,6 +62,8 @@
 #include <linux/of_irq.h>
 #endif
 
+#include <linux/switch.h>
+
 #if defined(CONFIG_TOUCHSCREEN_PROXIMITY)
 #include <linux/touch_psensor.h>
 #endif

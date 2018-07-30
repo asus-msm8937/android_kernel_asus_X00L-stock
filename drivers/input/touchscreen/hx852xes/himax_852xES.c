@@ -122,6 +122,10 @@ static void himax_ts_late_resume(struct early_suspend *h);
 
 static int self_test_inter_flag = 0;  //detect enter esd or not during self_test
 
+static struct switch_dev switch_fw_version;
+char fw_versions[40];
+
+
 #ifdef CONFIG_OF
 #if defined(HX_LOADIN_CONFIG)
 static int himax_parse_config(struct himax_ts_data *ts, struct himax_config *pdata);
@@ -1438,7 +1442,13 @@ static void himax_read_TP_info(struct i2c_client *client)
 	memset(TP_info,0,sizeof(TP_info));
 	sprintf(TP_info,"himax_852: ID:%x,fw:%x-%x,config:%x",private_ts->vendor_sensor_id,
 		private_ts->vendor_fw_ver_H,private_ts->vendor_fw_ver_L,private_ts->vendor_config_ver);
+	sprintf(fw_versions, "%x.%x-%x.%x",private_ts->vendor_sensor_id, private_ts->vendor_fw_ver_H,
+		private_ts->vendor_fw_ver_L,private_ts->vendor_config_ver);
 #endif
+}
+ssize_t himax_get_fws(struct switch_dev* sdev, char* buf)
+{
+	return	sprintf(buf, "%s\n", fw_versions);
 }
 
 #ifdef HX_ESD_WORKAROUND
@@ -6615,6 +6625,13 @@ static int himax852xes_probe(struct i2c_client *client, const struct i2c_device_
 #endif
 
 	himax_read_TP_info(client);
+        switch_fw_version.name = "touch";
+        switch_fw_version.print_name = himax_get_fws;
+        err = switch_dev_register(&switch_fw_version);
+        if (err < 0) {
+                E("%s: switch device create failed!\n", __func__);
+        }
+
 #ifdef HX_AUTO_UPDATE_FW
 	err = i_update_FW();
 	if(err == 0) {
