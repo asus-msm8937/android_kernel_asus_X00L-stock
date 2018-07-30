@@ -473,6 +473,11 @@ struct dischg_gain_soc {
 	u32			highc_gain[VOLT_GAIN_MAX];
 };
 
+struct battery_name {
+	struct switch_dev battery_switch_dev;
+	char battery_name_type[100];
+} battery_name;
+
 #define THERMAL_COEFF_N_BYTES		6
 struct fg_chip {
 	struct device		*dev;
@@ -6755,6 +6760,24 @@ fail:
 	return -EINVAL;
 }
 
+ssize_t battery_print_name(struct switch_dev *sdev,char *buf)
+{
+	return sprintf(buf,"%s\n",battery_name.battery_name_type);
+}
+static int battery_switch_register(void)
+{
+	int ret;
+	battery_name.battery_switch_dev.name="battery";
+	battery_name.battery_switch_dev.print_name=battery_print_name;
+	ret = switch_dev_register(&battery_name.battery_switch_dev);
+	if(ret<0)
+		return ret;
+	battery_name.battery_switch_dev.state=0;
+	switch_set_state(&battery_name.battery_switch_dev,
+		battery_name.battery_switch_dev.state);
+	return 0;
+}
+
 #define FG_PROFILE_LEN			128
 #define PROFILE_COMPARE_LEN		32
 #define THERMAL_COEFF_ADDR		0x444
@@ -6887,6 +6910,10 @@ wait:
 		rc = 0;
 		goto no_profile;
 	}
+	/* Add sys/class/switch/battery node for fw read battery profile */
+	strcpy(battery_name.battery_name_type,batt_type_str);
+	battery_switch_register();
+	/* Add end */
 
 	if (!chip->batt_profile)
 		chip->batt_profile = devm_kzalloc(chip->dev,
