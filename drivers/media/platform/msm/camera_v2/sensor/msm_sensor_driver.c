@@ -682,6 +682,7 @@ int32_t msm_sensor_driver_probe(void *setting,
 	struct msm_sensor_info_t *probed_info, char *entity_name)
 {
 	int32_t                              rc = 0;
+	int k = 0;
 	struct msm_sensor_ctrl_t            *s_ctrl = NULL;
 	struct msm_camera_cci_client        *cci_client = NULL;
 	struct msm_camera_sensor_slave_info *slave_info = NULL;
@@ -786,9 +787,9 @@ int32_t msm_sensor_driver_probe(void *setting,
 	}
 
 	/* Print slave info */
-	CDBG("camera id %d Slave addr 0x%X addr_type %d\n",
+	pr_err("camera id %d Slave addr 0x%X addr_type %d  slave_info->sensor_name =%s\n",
 		slave_info->camera_id, slave_info->slave_addr,
-		slave_info->addr_type);
+		slave_info->addr_type,slave_info->sensor_name);
 	CDBG("sensor_id_reg_addr 0x%X sensor_id 0x%X sensor id mask %d",
 		slave_info->sensor_id_info.sensor_id_reg_addr,
 		slave_info->sensor_id_info.sensor_id,
@@ -898,6 +899,16 @@ int32_t msm_sensor_driver_probe(void *setting,
 	cci_client->id_map = 0;
 	cci_client->i2c_freq_mode = slave_info->i2c_freq_mode;
 
+       if ((slave_info->camera_id == 1) && !strcmp(slave_info->sensor_name,"ov20880_4c")){
+		pr_err("----------slave_info->sensor_name =%s------", slave_info->sensor_name);
+		for (k = 0; k< s_ctrl->sensordata->power_info.num_vreg; k++) {
+			if (!strcmp( s_ctrl->sensordata->power_info.cam_vreg[k].reg_name, "cam_vdig")) {
+				s_ctrl->sensordata->power_info.cam_vreg[k].min_voltage = 1100000;
+				s_ctrl->sensordata->power_info.cam_vreg[k].max_voltage =1100000;			
+				break;
+		    }
+		}
+	 }
 	/* Parse and fill vreg params for powerup settings */
 	rc = msm_camera_fill_vreg_params(
 		s_ctrl->sensordata->power_info.cam_vreg,
