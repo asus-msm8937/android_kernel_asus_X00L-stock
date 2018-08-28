@@ -516,6 +516,7 @@ enum wake_reason {
 #define	HVDCP_OTG_VOTER			"HVDCP_OTG_VOTER"
 #define	HVDCP_PULSING_VOTER		"HVDCP_PULSING_VOTER"
 static int smbchg_charging_en(struct smbchg_chip *chip, bool en);
+static int smbchg_charging_is_enable(struct smbchg_chip *chip);
 
 static int smbchg_debug_mask;
 module_param_named(
@@ -1052,6 +1053,10 @@ static int get_prop_batt_status(struct smbchg_chip *chip)
 	if (battery_master_get_capacity_limit_flag() && (chip->capacity == 100)) {//bug 266540 modify by diganyun 2017/06/15
 		smbchg_charging_en(chip, false);
 		return POWER_SUPPLY_STATUS_FULL;
+	} else {
+		if(smbchg_charging_is_enable(chip)) {
+			smbchg_charging_en(chip, true);
+		}
 	}
 
 	rc = smbchg_read(chip, &reg, chip->chgr_base + CHGR_STS, 1);
@@ -1652,6 +1657,22 @@ static int smbchg_charging_en(struct smbchg_chip *chip, bool en)
 	return smbchg_masked_write(chip, chip->bat_if_base + CMD_CHG_REG,
 			EN_BAT_CHG_BIT, en ? 0 : EN_BAT_CHG_BIT);
 }
+
+static int smbchg_charging_is_enable(struct smbchg_chip *chip)
+{
+        int rc = 0;
+        u8 reg = 0;
+
+        rc = smbchg_read(chip, &reg, chip->bat_if_base + CMD_CHG_REG, 1);
+        if (rc < 0) {
+                dev_err(chip->dev,
+                                "Couldn't read charging enable bit rc=%d\n", rc);
+                return rc;
+        }
+
+       return (reg & EN_BAT_CHG_BIT) ? 1 : 0;
+}
+
 
 #define CMD_IL			0x40
 #define USBIN_SUSPEND_BIT	BIT(4)
@@ -7284,10 +7305,12 @@ static irqreturn_t usbin_uv_handler(int irq, void *_chip)
 			 * SDP or a grossly out of spec charger. Do not
 			 * draw any current from it.
 			 */
+/*
 			rc = vote(chip->usb_suspend_votable,
 					WEAK_CHARGER_EN_VOTER, true, 0);
 			if (rc < 0)
 				pr_err("could not disable charger: %d", rc);
+*/
 		} else if (aicl_level == chip->tables.usb_ilim_ma_table[0]) {
 			/*
 			 * we are in a situation where the adapter is not able
