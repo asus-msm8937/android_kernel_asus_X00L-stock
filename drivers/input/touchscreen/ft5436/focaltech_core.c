@@ -120,7 +120,7 @@
 #define PINCTRL_STATE_ACTIVE	"pmx_ts_active"
 #define PINCTRL_STATE_SUSPEND	"pmx_ts_suspend"
 #define PINCTRL_STATE_RELEASE	"pmx_ts_release"
-
+#include <linux/switch.h>
 /*******************************************************************************
 * Private enumerations, structures and unions using typedef
 *******************************************************************************/
@@ -155,7 +155,13 @@ static ssize_t fts_glove_switch_write_proc(struct file *, const char __user *, s
 
 static struct proc_dir_entry *fts_glove_switch_proc = NULL;
 static unsigned int fts_glove_enabled = 0;
-
+static struct switch_dev switch_fw_version;
+static ssize_t switch_tp_info_read(struct switch_dev *sdev, char *buf)
+{
+    //s32 ret = -1;
+    //ret += sprintf(buf, "Himax:0C6 vendor:holitech\n");
+    return sprintf(buf, "Himax:0C6 vendor:holitech\n");//ret;
+}
 static const struct file_operations glove_switch_proc_ops = {
     .owner = THIS_MODULE,
     .read = fts_glove_switch_read_proc,
@@ -1872,7 +1878,12 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 		dev_err(&client->dev, "failed to allocate input device\n");
 		return -ENOMEM;
 	}
-
+    switch_fw_version.name = "touch";
+	switch_fw_version.print_name = switch_tp_info_read;
+    err = switch_dev_register(&switch_fw_version);
+    if (err < 0) {
+    	printk("%s: switch device create failed!\n", __func__);
+    }
 	data->input_dev = input_dev;
 	data->client = client;
 	data->pdata = pdata;

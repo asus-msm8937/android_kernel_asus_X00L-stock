@@ -1448,7 +1448,7 @@ static void himax_read_TP_info(struct i2c_client *client)
 }
 ssize_t himax_get_fws(struct switch_dev* sdev, char* buf)
 {
-	return	sprintf(buf, "%s\n", fw_versions);
+	return sprintf(buf, "Himax:0C6 vendor:holitech\n");//sprintf(buf, "%s\n", fw_versions);
 }
 
 #ifdef HX_ESD_WORKAROUND
