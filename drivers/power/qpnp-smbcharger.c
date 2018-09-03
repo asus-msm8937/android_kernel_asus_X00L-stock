@@ -1054,7 +1054,7 @@ static int get_prop_batt_status(struct smbchg_chip *chip)
 		smbchg_charging_en(chip, false);
 		return POWER_SUPPLY_STATUS_FULL;
 	} else {
-		if(smbchg_charging_is_enable(chip)) {
+		if(smbchg_charging_is_enable(chip) && chip->chg_enabled) { // when charging_enabled node is 1, enable the CHG_ENABLE Regs to fix error
 			smbchg_charging_en(chip, true);
 		}
 	}
