@@ -15,6 +15,7 @@
 
 #include <linux/module.h>
 #include <linux/of_gpio.h>
+#include <linux/proc_fs.h>
 #include "msm_flash.h"
 #include "msm_camera_dt_util.h"
 #include "msm_cci.h"
@@ -51,6 +52,10 @@ static struct msm_flash_table *flash_table[] = {
 	&msm_gpio_flash_table,
 	&msm_pmic_flash_table
 };
+
+//add by allenyao
+struct msm_flash_ctrl_t *flash_ctrl_back = NULL;
+struct msm_flash_ctrl_t *flash_ctrl_front = NULL;
 
 static struct msm_camera_i2c_fn_t msm_flash_qup_func_tbl = {
 	.i2c_read = msm_camera_qup_i2c_read,
@@ -663,6 +668,11 @@ static int32_t msm_flash_release(
 	struct msm_flash_ctrl_t *flash_ctrl)
 {
 	int32_t rc = 0;
+	if (flash_ctrl->flash_state == MSM_CAMERA_FLASH_RELEASE) {
+		pr_err("%s:%d Invalid flash state = %d",
+			__func__, __LINE__, flash_ctrl->flash_state);
+		return 0;
+	}
 
 	rc = flash_ctrl->func_tbl->camera_flash_off(flash_ctrl, NULL);
 	if (rc < 0) {
@@ -1132,6 +1142,268 @@ static long msm_flash_subdev_fops_ioctl(struct file *file,
 }
 #endif
 
+#if 1
+//add for flashlight_cal by allenyao
+struct DUTY{
+	int high_duty;
+	int low_duty;
+};
+static int flashduty_test1=-1;
+static int flashduty_test2=-1;
+//static int open_flag4test=0;
+static ssize_t flash3_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	CDBG("[LED]get backlight duty value is:%d\n", flashduty_test1);
+	return sprintf(buf, "%d\n", flashduty_test1);
+}
+
+static ssize_t flash3_store(struct device *dev, struct device_attribute *attr, const char *buf,
+			  size_t size)
+{
+	uint32_t curr = 0, max_current = 0;
+	int32_t i = 0;
+	//unsigned char arg;
+	char *pvalue=NULL;
+	struct DUTY duty1;
+
+	CDBG("Enter!\n");
+
+	if((size != 2) || ((buf[0] != '0') && (buf[0] != '1'))){
+		CDBG(" command!count: %d, buf: %c\n",(int)size,buf[0]);
+		//return -EINVAL;
+	}
+
+
+	if (buf != NULL && size != 0) {
+		flashduty_test1 = simple_strtol(buf, &pvalue, 0);
+		CDBG("flashduty_test1: %d\n", flashduty_test1);
+
+		if (*pvalue ) {
+			flashduty_test2 = simple_strtol((pvalue + 1), NULL, 0);
+			CDBG("flashduty_test2: %d\n", flashduty_test2);
+		}
+	}
+
+	duty1.high_duty=flashduty_test1;
+	duty1.low_duty=flashduty_test2;
+
+	//arg = ((unsigned char)buf[0]) - '0';
+	//flashduty2 = ((unsigned char)buf[0]) - '0';
+
+	#if 1
+	//add by allenyao
+
+
+	/* Turn off flash triggers */
+	for (i = 0; i < flash_ctrl_back->flash_num_sources; i++)
+		if (flash_ctrl_back->flash_trigger[i])
+			led_trigger_event(flash_ctrl_back->flash_trigger[i], 0);
+
+	/* Turn on flash triggers */
+	for (i = 0; i < flash_ctrl_back->torch_num_sources; i++) {
+		if (flash_ctrl_back->torch_trigger[i]) {
+			max_current = flash_ctrl_back->torch_max_current[i];
+			if (flashduty_test1>= 0 &&
+				flashduty_test1 <
+				max_current) {
+				curr = flashduty_test1;
+			} else {
+				curr = flash_ctrl_back->torch_op_current[i];
+				CDBG("LED current clamped to %d\n",
+					curr);
+			}
+			CDBG("low_flash_current[%d] = %d", i, curr);
+			led_trigger_event(flash_ctrl_back->torch_trigger[i],
+				curr);
+		}
+	}
+	if (flash_ctrl_back->switch_trigger){
+		led_trigger_event(flash_ctrl_back->switch_trigger, 1);
+		CDBG("led_trigger_event  switch_trigger  %d",  1);
+	}
+	CDBG("Exit\n");
+	return size;
+	//end
+	#endif
+
+}
+
+
+//static DEVICE_ATTR(flash3, 0666, show_flashduty_test, store_flashduty_test);
+static DEVICE_ATTR_RW(flash3);
+
+static int torch0_value=0;
+static ssize_t torch_read(struct file *file, char *buf,
+	size_t len, loff_t *pos)
+{
+	return sprintf(buf, "%d\n", torch0_value);
+}
+
+static ssize_t torch_write(struct file *file, const char *buff,
+	size_t size, loff_t *pos)
+{
+	uint32_t curr = 0, max_current = 0;
+	int32_t i = 0;
+	int ret = 0;
+	char buf[10] = {0};
+	int torch_value = 0;
+
+	CDBG("Enter!\n");
+
+	if (copy_from_user(buf, buff, size))
+	{
+		return -EFAULT;
+	}
+	ret = kstrtouint(buf, 0, &torch_value);
+	torch0_value = torch_value;
+	/* Turn off flash triggers */
+	for (i = 0; i < flash_ctrl_back->flash_num_sources; i++)
+		if (flash_ctrl_back->flash_trigger[i])
+			led_trigger_event(flash_ctrl_back->flash_trigger[i], 0);
+
+	/* Turn on flash triggers */
+	for (i = 0; i < flash_ctrl_back->torch_num_sources; i++) {
+		if (flash_ctrl_back->torch_trigger[i]) {
+			max_current = flash_ctrl_back->torch_max_current[i];
+			if (torch_value>= 0 &&
+				torch_value <
+				max_current) {
+				curr = torch_value;
+			} else {
+				curr = flash_ctrl_back->torch_op_current[i];
+				CDBG("LED current clamped to %d\n",
+					curr);
+			}
+			CDBG("low_flash_current[%d] = %d", i, curr);
+			led_trigger_event(flash_ctrl_back->torch_trigger[i],
+				curr);
+		}
+	}
+	if (flash_ctrl_back->switch_trigger){
+		led_trigger_event(flash_ctrl_back->switch_trigger, 1);
+		CDBG("led_trigger_event  switch_trigger  %d",  1);
+	}
+	CDBG("Exit\n");
+	return size;
+}
+
+static struct file_operations asus_flashlight_fops =
+{
+	.owner = THIS_MODULE,
+	.read = torch_read,
+	.write = torch_write,
+};
+
+//end  by allenyao 
+#endif
+
+#if 1
+//add for flashlight_cal by allenyao
+static int flashduty_test3=-1;
+static int flashduty_test4=-1;
+//static int open_flag4test_1=0;
+static ssize_t flash4_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	CDBG("[LED]get backlight duty value is:%d\n", flashduty_test3);
+	return sprintf(buf, "%d\n", flashduty_test3);
+}
+
+static ssize_t flash4_store(struct device *dev, struct device_attribute *attr, const char *buf,
+			  size_t size)
+{
+	uint32_t curr = 0, max_current = 0;
+	int32_t i = 0;
+	//unsigned char arg;
+	char *pvalue=NULL;
+	struct DUTY duty1;
+
+	CDBG("Enter!\n");
+
+	if((size != 2) || ((buf[0] != '0') && (buf[0] != '1'))){
+		CDBG(" command!count: %d, buf: %c\n",(int)size,buf[0]);
+		//return -EINVAL;
+	}
+
+
+	if (buf != NULL && size != 0) {
+		flashduty_test3= simple_strtol(buf, &pvalue, 0);
+		CDBG("flashduty_test1: %d\n", flashduty_test3);
+
+		if (*pvalue ) {
+			flashduty_test4 = simple_strtol((pvalue + 1), NULL, 0);
+			CDBG("flashduty_test2: %d\n", flashduty_test4);
+		}
+	}
+
+	duty1.high_duty=flashduty_test3;
+	duty1.low_duty=flashduty_test4;
+
+	//arg = ((unsigned char)buf[0]) - '0';
+	//flashduty2 = ((unsigned char)buf[0]) - '0';
+
+		#if 1
+	//add by allenyao
+
+	/* Turn off flash triggers */
+	for (i = 0; i < flash_ctrl_front->flash_num_sources; i++)
+		if (flash_ctrl_front->flash_trigger[i])
+			led_trigger_event(flash_ctrl_front->flash_trigger[i], 0);
+
+	/* Turn on flash triggers */
+	for (i = 0; i < flash_ctrl_front->torch_num_sources; i++) {
+		if (flash_ctrl_front->torch_trigger[i]) {
+			max_current = flash_ctrl_front->torch_max_current[i];
+			if (flashduty_test3>= 0 &&
+				flashduty_test3 <
+				max_current) {
+				curr = flashduty_test3;
+			} else {
+				curr = flash_ctrl_front->torch_op_current[i];
+				CDBG("LED current clamped to %d\n",
+					curr);
+			}
+			CDBG("low_flash_current[%d] = %d", i, curr);
+			led_trigger_event(flash_ctrl_front->torch_trigger[i],
+				curr);
+		}
+	}
+	if (flash_ctrl_front->switch_trigger){
+		led_trigger_event(flash_ctrl_front->switch_trigger, 1);
+		CDBG("led_trigger_event  switch_trigger  %d",  1);
+	}
+	CDBG("Exit\n");
+	return size;
+	//end
+	#endif
+
+}
+
+
+//static DEVICE_ATTR(flash3, 0666, show_flashduty_test, store_flashduty_test);
+static DEVICE_ATTR_RW(flash4);
+
+//end  by allenyao 
+#endif
+
+
+//add by allenyao
+int probe_flag=0;
+static struct class *flashlight_class;
+static struct device *flashlight_device;
+static dev_t flashlight_devno;
+#define ALLOC_DEVNO
+#define FLASHLIGHT_DEVNAME            "kd_camera_flashlight"
+static struct cdev flashlight_cdev;
+static const struct file_operations flashlight_fops = {
+	.owner = THIS_MODULE,
+	.unlocked_ioctl = NULL,
+	.open = NULL,
+	.release = NULL,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl = NULL,
+#endif
+};
+
 static int msm_camera_flash_i2c_probe(struct i2c_client *client,
 	const struct i2c_device_id *id)
 {
@@ -1270,7 +1542,69 @@ static int32_t msm_flash_platform_probe(struct platform_device *pdev)
 		msm_flash_subdev_fops_ioctl;
 #endif
 	flash_ctrl->msm_sd.sd.devnode->fops = &msm_flash_v4l2_subdev_fops;
+	//add by allenyao
+	if(probe_flag==0){
+		#ifdef ALLOC_DEVNO
+		rc = alloc_chrdev_region(&flashlight_devno, 0, 1, FLASHLIGHT_DEVNAME);
+		if (rc) {
+			CDBG("[flashlight_probe] alloc_chrdev_region fail: %d ~", rc);
+			//goto flashlight_probe_error;
+		} else {
+			CDBG("[flashlight_probe] major: %d, minor: %d ~", MAJOR(flashlight_devno),
+			     MINOR(flashlight_devno));
+		}
+		cdev_init(&flashlight_cdev, &flashlight_fops);
+		flashlight_cdev.owner = THIS_MODULE;
+		rc = cdev_add(&flashlight_cdev, flashlight_devno, 1);
+		if (rc) {
+			CDBG("[flashlight_probe] cdev_add fail: %d ~", rc);
+			//goto flashlight_probe_error;
+		}
+		#else
+		#define FLASHLIGHT_MAJOR 242
+		rc = register_chrdev(FLASHLIGHT_MAJOR, FLASHLIGHT_DEVNAME, &flashlight_fops);
+		if (rc != 0) {
+			logI("[flashlight_probe] Unable to register chardev on major=%d (%d) ~",
+			     FLASHLIGHT_MAJOR, rc);
+			return rc;
+		}
+		flashlight_devno = MKDEV(FLASHLIGHT_MAJOR, 0);
+		#endif
 
+		flashlight_class = class_create(THIS_MODULE, "flashlightdrv");
+		if (IS_ERR(flashlight_class)) {
+			pr_err("[flashlight_probe] Unable to create class, err = %d ~",
+			     (int)PTR_ERR(flashlight_class));
+			return  -1 ;
+		}
+
+		flashlight_device =
+		    device_create(flashlight_class, NULL, flashlight_devno, NULL, FLASHLIGHT_DEVNAME);
+		if (NULL == flashlight_device) {
+			//CDBG("[flashlight_probe] device_create fail ~");
+			//goto flashlight_probe_error;
+	       }
+	}
+	
+	if(probe_flag==0){
+		flash_ctrl_back=flash_ctrl;		
+		rc = device_create_file(flashlight_device, &dev_attr_flash3);
+		if (rc) {
+			//CDBG("[flashlight_probe]device_create_file flash3 fail!\n");
+		}
+		proc_create("driver/asus_flash_brightness", 0x0644, NULL, &asus_flashlight_fops);
+	}
+	if(probe_flag==1){
+		flash_ctrl_front=flash_ctrl;
+		rc = device_create_file(flashlight_device, &dev_attr_flash4);
+		if (rc) {
+			//CDBG("[flashlight_probe]device_create_file flash4 fail!\n");
+		}
+		
+	}
+	probe_flag++;
+	//add by allenyao
+	
 	if (flash_ctrl->flash_driver_type == FLASH_DRIVER_PMIC)
 		rc = msm_torch_create_classdev(pdev, flash_ctrl);
 

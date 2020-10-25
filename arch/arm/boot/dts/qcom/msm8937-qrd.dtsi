@@ -18,10 +18,20 @@
 	gpio_keys {
 		compatible = "gpio-keys";
 		input-name = "gpio-keys";
-		pinctrl-names = "tlmm_gpio_key_active","tlmm_gpio_key_suspend";
+		pinctrl-names = "tlmm_gpio_key_active",
+						"tlmm_gpio_key_suspend",
+						"pmx_rf_read_gpio92",
+						"pmx_rf_read_gpio93",
+						"pmx_rf_read_gpio94",
+						"pmx_rf_read_gpio95",
+						 "cardTray_gpio67";
 		pinctrl-0 = <&gpio_key_active>;
 		pinctrl-1 = <&gpio_key_suspend>;
-
+		pinctrl-2 = <&rf_read_gpio92_active>;
+		pinctrl-3 = <&rf_read_gpio93_active>;
+		pinctrl-4 = <&rf_read_gpio94_active>;
+		pinctrl-5 = <&rf_read_gpio95_active>;
+		pinctrl-6 = <&cardtray_gpio67_active>;
 		vol_up {
 			label = "volume_up";
 			gpios = <&tlmm 91 0x1>;
@@ -46,9 +56,11 @@
 		"pri_i2s_act";
 	pinctrl-names =
 		"all_off",
-		"pri_i2s_act";
+		"pri_i2s_act",
+		"pmx_analog_switch";
 	pinctrl-0 = <&cdc_pdm_lines_sus &cdc_pdm_lines_2_sus>;
 	pinctrl-1 = <&cdc_pdm_lines_act &cdc_pdm_lines_2_act>;
+	pinctrl-2 = <&analog_switch_active>;
 	qcom,cdc-us-euro-gpios;
 	qcom,msm-hs-micbias-type = "internal";
 	qcom,audio-routing =
@@ -115,8 +127,8 @@
 	qcom,vdd-io-current-level = <200 22000>;
 
 	pinctrl-names = "active", "sleep";
-	pinctrl-0 = <&sdc2_clk_on &sdc2_cmd_on &sdc2_data_on &sdc2_cd_on>;
-	pinctrl-1 = <&sdc2_clk_off &sdc2_cmd_off &sdc2_data_off &sdc2_cd_off>;
+	pinctrl-0 = <&sdc2_clk_on &sdc2_cmd_on &sdc2_data_on>;
+	pinctrl-1 = <&sdc2_clk_off &sdc2_cmd_off &sdc2_data_off>;
 
 	#address-cells = <0>;
 	interrupt-parent = <&sdhc_2>;
@@ -127,10 +139,10 @@
 		1 &intc 0 221 0
 		2 &tlmm 67 0>;
 	interrupt-names = "hc_irq", "pwr_irq", "status_irq";
-	cd-gpios = <&tlmm 67 0x1>;
+	cd-gpios = <&tlmm 67 0x0>;
 
 	qcom,clk-rates = <400000 20000000 25000000 50000000 100000000
-								200000000>;
+								>;
 	qcom,bus-speed-mode = "SDR12", "SDR25", "SDR50", "DDR50", "SDR104";
 
 	status = "ok";
@@ -169,6 +181,4 @@
 	};
 };
 
-&pm8937_vadc {
-	/delete-node/ chan@11;
-};
+

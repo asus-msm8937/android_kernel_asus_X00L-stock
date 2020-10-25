@@ -35,6 +35,8 @@
 #include <linux/string_helpers.h>
 #include <linux/alarmtimer.h>
 #include <linux/qpnp/qpnp-revid.h>
+#include <linux/switch.h>
+#include <linux/rtc.h>
 
 /* Register offsets */
 
@@ -78,6 +80,12 @@
 #define BCL_MA_TO_ADC(_current, _adc_val) {		\
 	_adc_val = (u8)((_current) * 100 / 976);	\
 }
+
+/* battery master feature */
+#define ASUS_BATTERY_MASTER_FUNCTION
+//#define CAPACITY_DEBUG_SIMULATE
+int capacity_limit_flag = false;
+/* end */
 
 /* Debug Flag Definitions */
 enum {
@@ -172,7 +180,7 @@ struct fg_cyc_ctr_data {
 	bool			en;
 	bool			started[BUCKET_COUNT];
 	u16			count[BUCKET_COUNT];
-	u8			last_soc[BUCKET_COUNT];
+	u8			last_soc_origin[BUCKET_COUNT];
 	int			id;
 	struct mutex		lock;
 };
@@ -465,6 +473,11 @@ struct dischg_gain_soc {
 	u32			highc_gain[VOLT_GAIN_MAX];
 };
 
+struct battery_name {
+	struct switch_dev battery_switch_dev;
+	char battery_name_type[100];
+} battery_name;
+
 #define THERMAL_COEFF_N_BYTES		6
 struct fg_chip {
 	struct device		*dev;
@@ -616,8 +629,8 @@ struct fg_chip {
 	bool			ima_error_handling;
 	bool			block_sram_access;
 	bool			irqs_enabled;
-	bool			use_last_soc;
-	int			last_soc;
+	bool			use_last_soc_origin;
+	int			last_soc_origin;
 	/* Validating temperature */
 	int			last_good_temp;
 	int			batt_temp_low_limit;
@@ -638,6 +651,27 @@ struct fg_chip {
 	bool			batt_info_restore;
 	bool			*batt_range_ocv;
 	int			*batt_range_pct;
+#if (defined ASUS_BATTERY_MASTER_FUNCTION)
+	struct device *battery_master_root_dev;
+	struct switch_dev sdev;
+	struct delayed_work bat_master_workqueue;
+	int user_limit_read;
+	int user_capacity_limit;
+	int last_user_capacity_limit;
+	int capacity_limit;
+	int capacity;
+	int last_capacity_limit;
+	int last_capacity;
+	int last_soc;
+	int capacity_to_soc;
+	int capacity_map_multiple;
+	int capacity_map_divide;
+	int battery_master_init;
+	unsigned long last_soc_change_time;
+	int battery_capacity;
+	int debug_capacity;
+	int debug_flag;
+#endif
 };
 
 /* FG_MEMIF DEBUGFS structures */
@@ -2247,10 +2281,10 @@ static int get_prop_capacity(struct fg_chip *chip)
 	int msoc, rc;
 	bool vbatt_low_sts;
 
-	if (chip->use_last_soc && chip->last_soc) {
-		if (chip->last_soc == FULL_SOC_RAW)
+	if (chip->use_last_soc_origin && chip->last_soc_origin) {
+		if (chip->last_soc_origin == FULL_SOC_RAW)
 			return FULL_CAPACITY;
-		return DIV_ROUND_CLOSEST((chip->last_soc - 1) *
+		return DIV_ROUND_CLOSEST((chip->last_soc_origin - 1) *
 				(FULL_CAPACITY - 2),
 				FULL_SOC_RAW - 2) + 1;
 	}
@@ -2259,7 +2293,11 @@ static int get_prop_capacity(struct fg_chip *chip)
 		return MISSING_CAPACITY;
 
 	if (!chip->profile_loaded && !chip->use_otp_profile)
-		return DEFAULT_CAPACITY;
+	{
+	/*bug 264744 diganyun modify by 2017/5/24 for off chg soc show not real ,50 first show*/
+		msoc=get_monotonic_soc_raw(chip);
+		return DIV_ROUND_CLOSEST((msoc - 1) * (FULL_CAPACITY - 2), FULL_SOC_RAW - 2) + 1;
+	}
 
 	if (chip->charge_full)
 		return FULL_CAPACITY;
@@ -2282,7 +2320,7 @@ static int get_prop_capacity(struct fg_chip *chip)
 			}
 
 			if (!vbatt_low_sts)
-				return DIV_ROUND_CLOSEST((chip->last_soc - 1) *
+				return DIV_ROUND_CLOSEST((chip->last_soc_origin - 1) *
 						(FULL_CAPACITY - 2),
 						FULL_SOC_RAW - 2) + 1;
 			else
@@ -2343,6 +2381,9 @@ static int get_prop_jeita_temp(struct fg_chip *chip, unsigned int type)
 	if (fg_debug_mask & FG_POWER_SUPPLY)
 		pr_info("addr 0x%02X, offset %d\n", settings[type].address,
 			settings[type].offset);
+
+	pr_err("[allan]:addr 0x%02X, offset %d, value: %d\n", settings[type].address,
+			settings[type].offset, settings[type].value);
 
 	return settings[type].value;
 }
@@ -2631,15 +2672,15 @@ static int update_sram_data(struct fg_chip *chip, int *resched_ms)
 				pr_err("Couldn't save sram registers\n");
 				goto out;
 			}
-			if (!chip->use_last_soc) {
-				chip->last_soc = get_monotonic_soc_raw(chip);
+			if (!chip->use_last_soc_origin) {
+				chip->last_soc_origin = get_monotonic_soc_raw(chip);
 				chip->last_cc_soc = div64_s64(
-					(int64_t)chip->last_soc *
+					(int64_t)chip->last_soc_origin *
 					FULL_PERCENT_28BIT, FULL_SOC_RAW);
 			}
 			if (fg_debug_mask & FG_STATUS)
-				pr_info("last_soc: %d last_cc_soc: %lld\n",
-					chip->last_soc, chip->last_cc_soc);
+				pr_info("last_soc_origin: %d last_cc_soc: %lld\n",
+					chip->last_soc_origin, chip->last_cc_soc);
 		} else {
 			pr_err("update_sram failed\n");
 			goto out;
@@ -2930,7 +2971,7 @@ static void clear_cycle_counter(struct fg_chip *chip)
 	memset(chip->cyc_ctr.count, 0, len);
 	for (i = 0; i < BUCKET_COUNT; i++) {
 		chip->cyc_ctr.started[i] = false;
-		chip->cyc_ctr.last_soc[i] = 0;
+		chip->cyc_ctr.last_soc_origin[i] = 0;
 	}
 	rc = fg_mem_write(chip, (u8 *)&chip->cyc_ctr.count,
 			BATT_CYCLE_NUMBER_REG, len,
@@ -3005,22 +3046,22 @@ static void update_cycle_count(struct work_struct *work)
 				goto out;
 			} else {
 				chip->cyc_ctr.started[bucket - 1] = false;
-				chip->cyc_ctr.last_soc[bucket - 1] = 0;
+				chip->cyc_ctr.last_soc_origin[bucket - 1] = 0;
 			}
 		}
 		if (!chip->cyc_ctr.started[bucket]) {
 			chip->cyc_ctr.started[bucket] = true;
-			chip->cyc_ctr.last_soc[bucket] = batt_soc;
+			chip->cyc_ctr.last_soc_origin[bucket] = batt_soc;
 		}
 	} else {
 		for (i = 0; i < BUCKET_COUNT; i++) {
 			if (chip->cyc_ctr.started[i] &&
-				batt_soc > chip->cyc_ctr.last_soc[i]) {
+				batt_soc > chip->cyc_ctr.last_soc_origin[i]) {
 				rc = fg_inc_store_cycle_ctr(chip, i);
 				if (rc)
 					pr_err("Error in storing cycle_ctr rc: %d\n",
 						rc);
-				chip->cyc_ctr.last_soc[i] = 0;
+				chip->cyc_ctr.last_soc_origin[i] = 0;
 			}
 			chip->cyc_ctr.started[i] = false;
 		}
@@ -4034,7 +4075,7 @@ static void status_change_work(struct work_struct *work)
 	}
 
 	if (chip->status == POWER_SUPPLY_STATUS_FULL) {
-		if (capacity >= 99 && chip->hold_soc_while_full
+		if (capacity >= 98 && chip->hold_soc_while_full
 				&& chip->health == POWER_SUPPLY_HEALTH_GOOD) {
 			if (fg_debug_mask & FG_STATUS)
 				pr_info("holding soc at 100\n");
@@ -4324,8 +4365,8 @@ static int fg_restore_soc(struct fg_chip *chip)
 	int rc;
 	u16 msoc;
 
-	if (chip->use_last_soc && chip->last_soc)
-		msoc = DIV_ROUND_CLOSEST(chip->last_soc * 0xFFFF,
+	if (chip->use_last_soc_origin && chip->last_soc_origin)
+		msoc = DIV_ROUND_CLOSEST(chip->last_soc_origin * 0xFFFF,
 				FULL_SOC_RAW);
 	else
 		return 0;
@@ -4399,11 +4440,11 @@ static void fg_restore_battery_info(struct fg_chip *chip)
 	int rc;
 	char buf[4] = {0, 0, 0, 0};
 
-	chip->last_soc = DIV_ROUND_CLOSEST(chip->batt_info[BATT_INFO_SOC] *
+	chip->last_soc_origin = DIV_ROUND_CLOSEST(chip->batt_info[BATT_INFO_SOC] *
 				FULL_SOC_RAW, FULL_CAPACITY);
-	chip->last_cc_soc = div64_s64((int64_t)chip->last_soc *
+	chip->last_cc_soc = div64_s64((int64_t)chip->last_soc_origin *
 				FULL_PERCENT_28BIT, FULL_SOC_RAW);
-	chip->use_last_soc = true;
+	chip->use_last_soc_origin = true;
 	chip->use_last_cc_soc = true;
 	rc = fg_restore_soc(chip);
 	if (rc) {
@@ -4589,7 +4630,11 @@ static int fg_power_get_property(struct power_supply *psy,
 			val->strval = chip->batt_type;
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
+#if (defined ASUS_BATTERY_MASTER_FUNCTION)
+		val->intval = chip->last_soc;
+#else
 		val->intval = get_prop_capacity(chip);
+#endif
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY_RAW:
 		val->intval = get_sram_prop_now(chip, FG_DATA_BATT_SOC);
@@ -4646,7 +4691,13 @@ static int fg_power_get_property(struct power_supply *psy,
 		val->intval = chip->nom_cap_uah;
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_FULL:
-		val->intval = chip->learning_data.learned_cc_uah;
+		//modify tt1023507 show batt_mah 3000mah by diganyun 20170602 start
+		if(!strcmp(chip->batt_type,"C11P1511-O-01-0001-1.1.1")){
+			val->intval = 3000000; 
+		}else{
+			val->intval = chip->learning_data.learned_cc_uah;
+		}
+		//modify tt1023507 show batt_mah 3000mah by diganyun 20170602 end
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_NOW:
 		val->intval = chip->learning_data.cc_uah;
@@ -4818,6 +4869,409 @@ static int fg_power_set_property(struct power_supply *psy,
 
 	return rc;
 };
+
+
+/* asus battery master function */
+#if (defined ASUS_BATTERY_MASTER_FUNCTION)
+void  battery_master_set_capacity_limit_flag(struct fg_chip *chip)
+{
+	if (chip->capacity_limit == true) {
+		capacity_limit_flag = true;
+	} else {
+		capacity_limit_flag = false;
+	}
+}
+
+int battery_master_get_capacity_limit_flag(void)
+{
+	return capacity_limit_flag;
+}
+#else
+int battery_master_get_capacity_limit_flag(void)
+{
+	return capacity_limit_flag;
+}
+#endif
+
+#if (defined ASUS_BATTERY_MASTER_FUNCTION)
+#define BATTERY_MASTER_INIT_TIMES		5
+#define BATTERY_MASTER_MONITOR_MES_INTERVAL	5*HZ
+#define CAPACITY_LIMIT_ENABLE	80
+#define CAPACITY_LIMIT_DISABLE	100
+#define CAPACITY_MAPPING_THRESHOLD 40
+/*bug 266540 modify by diganyun 2017/06/15 begin*/
+#define CAPACITY_MAPPING_DIFF 21
+#define CAPACITY_MAPPING_MULTIPLE  71
+#define CAPACITY_MAPPING_DIVIDE  47
+#define CAPACITY_CHARGE_FULL	CAPACITY_MAPPING_DIVIDE + 33
+/*bug 266540 modify by diganyun 2017/06/15 end*/
+#define CAPACITY_DECLINE_TIME	80
+#define CAPACITY_RISE_TIME	45
+#define BATTERY_PROFILE_MAP1	"map1"
+#define BATTERY_PROFILE_MAP2	"map2"
+
+extern int battery_master_limit_info_write(int limit, int map);
+extern int battery_master_limit_info_read(int *limit, int *map);
+
+static int get_system_current_time(unsigned long *now_tm_sec)
+{
+	struct rtc_time tm;
+	struct rtc_device *rtc;
+	int ret;
+
+	rtc = rtc_class_open(CONFIG_RTC_HCTOSYS_DEVICE);
+	if (rtc == NULL) {
+		pr_err("%s: unable to open rtc device (%s)\n",
+			__FILE__, CONFIG_RTC_HCTOSYS_DEVICE);
+		return -EINVAL;
+	}
+
+	ret = rtc_read_time(rtc, &tm);
+	if (ret) {
+		pr_err("Error reading rtc device (%s) : %d\n",
+			CONFIG_RTC_HCTOSYS_DEVICE, ret);
+		goto close_time;
+	}
+
+	ret = rtc_valid_tm(&tm);
+	if (ret) {
+		pr_err("Invalid RTC time (%s): %d\n",
+			CONFIG_RTC_HCTOSYS_DEVICE, ret);
+		goto close_time;
+	}
+	rtc_tm_to_time(&tm, now_tm_sec);
+
+close_time:
+	rtc_class_close(rtc);
+	return ret;
+}
+
+
+static int battery_master_recovery_capacity_limit(struct fg_chip *chip)
+{
+	int ret = 0;
+	int save_map = 0;
+	int save_limit = 0;
+	static int read_count = 0;
+
+	if (chip->user_limit_read == true) {
+		ret = battery_master_limit_info_read(&save_limit, &save_map);
+		dev_err(chip->dev,
+				"[allan 2]:save_limit = %d, save_map = %d\n", save_limit, save_map);
+		if (save_limit == CAPACITY_LIMIT_ENABLE) {
+			chip->user_capacity_limit = 1;
+			chip->user_limit_read = false;
+		} else if (save_limit == CAPACITY_LIMIT_DISABLE) {
+			chip->user_capacity_limit = 0;
+			chip->user_limit_read = false;
+		} else {
+			chip->user_capacity_limit = 0;
+			chip->user_limit_read = true;
+		}
+
+		if (save_map == 1) {
+			chip->capacity_limit = true;
+		} else {
+			chip->capacity_limit = false;
+		}
+
+		read_count++;
+		if (read_count >= 5) {
+			chip->user_limit_read = false;
+		}
+
+       }
+
+	return ret;
+}
+
+static int battery_master_store_capacity_limit(struct fg_chip *chip)
+{
+	int ret = 0;
+
+	if (chip->capacity_limit != chip->last_capacity_limit) {
+		ret = battery_master_limit_info_write(chip->user_capacity_limit,
+										chip->capacity_limit);
+		if (ret <= 0) {
+			dev_err(chip->dev,
+				"Couldn't store user limit, ret = %d\n", ret);
+		}
+
+		chip->last_capacity_limit = chip->capacity_limit;
+	}
+
+	if (chip->user_capacity_limit != chip->last_user_capacity_limit) {
+		ret = battery_master_limit_info_write(chip->user_capacity_limit,
+										chip->capacity_limit);
+		if (ret <= 0) {
+			dev_err(chip->dev,
+				"Couldn't store user limit, ret = %d\n", ret);
+		}
+
+		chip->last_user_capacity_limit = chip->user_capacity_limit;
+	}
+
+	return ret;
+}
+
+static int battery_master_change_capacity_limit(struct fg_chip *chip, int capacity)
+{
+	int ret = 0;
+
+	if (chip->user_capacity_limit == 1) {
+		if (capacity < CAPACITY_MAPPING_THRESHOLD) {
+			chip->capacity_limit = false;
+		} else if (capacity > CAPACITY_MAPPING_THRESHOLD
+				&& chip->last_capacity <= CAPACITY_MAPPING_THRESHOLD) {
+			chip->capacity_limit = true;
+		}
+	} else if (chip->user_capacity_limit == 0) {
+		if (capacity < CAPACITY_MAPPING_THRESHOLD) {
+			chip->capacity_limit = false;
+		} else if (capacity > CAPACITY_MAPPING_THRESHOLD
+				&& chip->last_capacity <= CAPACITY_MAPPING_THRESHOLD) {
+			chip->capacity_limit = false;
+		}
+	}
+
+	if (chip->capacity_limit != chip->last_capacity_limit) {
+		switch_set_state(&chip->sdev, chip->capacity_limit);
+	}
+
+	return ret;
+}
+
+static int battery_master_calibration_batt_capacity(struct fg_chip *chip, int capacity)
+{
+	int soc, soc_integer, soc_remainder;
+	int soc_change, soc_change_time;
+	unsigned long now_tm_sec = 0;
+
+	chip->last_capacity = capacity;
+	if (chip->capacity_limit != true) {
+		chip->last_soc = capacity;
+		chip->last_soc_change_time = now_tm_sec;
+		return chip->last_soc;
+	}
+
+	if (get_system_current_time(&now_tm_sec)) {
+		pr_err("RTC read failed\n");
+		return 0;
+	}
+
+	soc_change_time = now_tm_sec - chip->last_soc_change_time;
+	soc_integer = (capacity * chip->capacity_map_multiple)
+					/chip->capacity_map_divide;
+	soc_remainder =  (capacity * chip->capacity_map_multiple)
+					% chip->capacity_map_divide;
+	if (soc_remainder >= (chip->capacity_map_divide /2)) {
+		soc_remainder = 1;
+	} else {
+		soc_remainder = 0;
+	}
+	soc = soc_integer + soc_remainder - CAPACITY_MAPPING_DIFF;
+	soc = max(0, soc);
+	soc = min(100, soc);
+	soc_change = min((int)abs(chip->last_soc - soc), 1);
+
+	if (chip->capacity_to_soc == false) {
+		chip->last_soc = soc;
+		chip->capacity_to_soc = true;
+	}
+
+	dev_dbg(chip->dev,
+				"[allan 1]:multiple = %d, divide = %d, soc_integer = %d, soc_remainder = %d\n",
+				chip->capacity_map_multiple, chip->capacity_map_divide,
+				soc_integer, soc_remainder);
+
+	dev_dbg(chip->dev,
+				"[allan 1]:soc = %d, last_soc = %d, soc_change = %d, soc_change_time = %d\n",
+				soc, chip->last_soc, soc_change, soc_change_time);
+
+	if (soc < chip->last_soc && soc >= 0
+		&& soc_change_time >= CAPACITY_DECLINE_TIME) {
+		chip->last_soc = chip->last_soc - soc_change;
+		chip->last_soc_change_time = now_tm_sec;
+	}
+	if (soc > chip->last_soc && soc <= 100
+		&& soc_change_time >= CAPACITY_RISE_TIME) {
+		if (soc == 100 && capacity < CAPACITY_CHARGE_FULL) {
+			return chip->last_soc;
+		}
+
+		chip->last_soc = chip->last_soc + soc_change;
+		chip->last_soc_change_time = now_tm_sec;
+	}
+
+	chip->last_soc = max(0, chip->last_soc);
+	chip->last_soc = min(100, chip->last_soc);
+	dev_dbg(chip->dev,
+				"[allan 2]:soc = %d, last_soc = %d, soc_change = %d, soc_change_time = %d\n",
+				soc, chip->last_soc, soc_change, soc_change_time);
+
+	return chip->last_soc;
+}
+
+static void battery_master_monitor_work_callback(struct work_struct *work)
+{
+	static int battery_master_init_count = 0;
+	int battery_master_interval = 0;
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct fg_chip *chip = container_of(dwork,
+					struct fg_chip, bat_master_workqueue);
+
+	chip->capacity = get_prop_capacity(chip); //add capacity get
+	battery_master_recovery_capacity_limit(chip);
+	dev_dbg(chip->dev,
+			"[allan 1]:original_capacity = %d, last_capacity = %d, soc = %d, user_limit = %d, capacity_limit = %d\n",
+			chip->debug_flag ? chip->debug_capacity : chip->capacity,
+			chip->last_capacity, chip->last_soc,
+			chip->user_capacity_limit, chip->capacity_limit);
+//use debug_flag as debug info
+	battery_master_change_capacity_limit(chip,
+					chip->debug_flag ? chip->debug_capacity : chip->capacity);
+	battery_master_calibration_batt_capacity(chip,
+					chip->debug_flag ? chip->debug_capacity : chip->capacity);
+	battery_master_store_capacity_limit(chip);
+	battery_master_set_capacity_limit_flag(chip);
+
+	dev_dbg(chip->dev,
+				"[allan 2]:original_capacity = %d, last_capacity = %d, soc = %d, user_limit = %d, capacity_limit = %d\n",
+				chip->debug_flag ? chip->debug_capacity : chip->capacity,
+				chip->last_capacity, chip->last_soc,
+				chip->user_capacity_limit, chip->capacity_limit);
+
+	if (chip->battery_master_init == false) {
+		battery_master_init_count++;
+		if (battery_master_init_count >= BATTERY_MASTER_INIT_TIMES) {
+			chip->battery_master_init = true;
+		}
+		battery_master_interval = 1*HZ;
+	} else {
+		battery_master_interval = BATTERY_MASTER_MONITOR_MES_INTERVAL;
+	}
+
+	schedule_delayed_work(&chip->bat_master_workqueue,
+							battery_master_interval);
+}
+
+static ssize_t battery_master_chg_limit_store(struct device * dev,
+									struct device_attribute *attr, const char * buf, size_t count)
+{
+	struct fg_chip *chip = dev_get_drvdata(dev);
+	int limit = 0;
+
+	printk("%s: entry\n", __func__);
+
+	if (!strncmp(buf, "limit", 5)) {
+		limit =  simple_strtol(&buf[5], NULL, 10);
+	}
+
+	if (limit == CAPACITY_LIMIT_ENABLE) {
+		chip->user_capacity_limit = 1;
+	} else if (limit == CAPACITY_LIMIT_DISABLE) {
+		chip->user_capacity_limit = 0;
+	}
+
+	return count;
+}
+
+static ssize_t battery_master_chg_limit_show(struct device *dev,
+									struct device_attribute *attr, char *buf)
+{
+	struct fg_chip *chip = dev_get_drvdata(dev);
+
+	printk("%s: entry\n", __func__);
+	return sprintf(buf, "%s\n", chip->user_capacity_limit ? "limit80": "limit100");
+}
+
+static ssize_t battery_master_bat_map_store(struct device * dev,
+									struct device_attribute *attr, const char * buf, size_t count)
+{
+	printk("%s: entry, do nothing !\n", __func__);
+
+	return count;
+}
+
+static ssize_t battery_master_bat_map_show(struct device *dev,
+									struct device_attribute *attr, char *buf)
+{
+	struct fg_chip *chip = dev_get_drvdata(dev);
+
+	printk("%s: entry\n", __func__);
+	return sprintf(buf, "%s\n", chip->capacity_limit ? "Tab2": "Tab1");
+}
+
+static ssize_t battery_master_debug_capacity_store(struct device * dev,
+									struct device_attribute *attr, const char * buf, size_t count)
+{
+	struct fg_chip *chip = dev_get_drvdata(dev);
+
+	printk("%s: entry\n", __func__);
+
+	if (!strncmp(buf, "capacity", 8)) {
+		chip->debug_capacity =  simple_strtol(&buf[8], NULL, 10);
+		chip->debug_flag = true;//add debug
+	} else {
+		printk("use: echo [capacityxxx] > /sys/devices/battery_master/debug_capacity\n");
+	}
+
+	return count;
+}
+
+static ssize_t battery_master_debug_capacity_show(struct device *dev,
+									struct device_attribute *attr, char *buf)
+{
+	struct fg_chip *chip = dev_get_drvdata(dev);
+
+	printk("%s: entry\n", __func__);
+	return sprintf(buf, "%d\n", chip->debug_capacity);
+}
+
+static ssize_t battery_master_real_soc_store(struct device * dev,
+									struct device_attribute *attr, const char * buf, size_t count)
+{
+	printk("%s: entry, do nothing !\n", __func__);
+
+	return count;
+}
+
+static ssize_t battery_master_real_soc_show(struct device *dev,
+									struct device_attribute *attr, char *buf)
+{
+	struct fg_chip *chip = dev_get_drvdata(dev);
+	int real_soc;
+
+	printk("%s: entry\n", __func__);
+
+	if (chip->capacity_limit == true) {
+		real_soc =((chip->last_soc + CAPACITY_MAPPING_DIFF)
+				* chip->capacity_map_divide)
+				/chip->capacity_map_multiple;
+		if (real_soc >= CAPACITY_LIMIT_ENABLE) {
+			real_soc = CAPACITY_LIMIT_ENABLE;
+		}
+	} else {
+		real_soc = chip->capacity;
+	}
+
+	return sprintf(buf, "%d\n", real_soc);
+}
+
+static DEVICE_ATTR(chg_limit, S_IWUSR|S_IRUSR|S_IROTH|S_IRGRP,
+						battery_master_chg_limit_show, battery_master_chg_limit_store);
+
+static DEVICE_ATTR(bat_map, S_IWUSR|S_IRUSR|S_IROTH|S_IRGRP,
+						battery_master_bat_map_show, battery_master_bat_map_store);
+
+static DEVICE_ATTR(debug_capacity, S_IWUSR|S_IRUSR|S_IROTH|S_IRGRP,
+						battery_master_debug_capacity_show, battery_master_debug_capacity_store);
+
+static DEVICE_ATTR(real_soc, S_IWUSR|S_IRUSR|S_IROTH|S_IRGRP,
+						battery_master_real_soc_show, battery_master_real_soc_store);
+#endif
+/* [PLATFORM]-Mod-END by pingao.yang */
+
 
 static int fg_property_is_writeable(struct power_supply *psy,
 						enum power_supply_property psp)
@@ -5039,7 +5493,7 @@ static void cc_soc_store_work(struct work_struct *work)
 	cc_soc_pct = get_sram_prop_now(chip, FG_DATA_CC_CHARGE);
 	cc_soc_pct = div64_s64(cc_soc_pct * 100,
 				chip->nom_cap_uah);
-	chip->last_cc_soc = div64_s64((int64_t)chip->last_soc *
+	chip->last_cc_soc = div64_s64((int64_t)chip->last_soc_origin *
 				FULL_PERCENT_28BIT, FULL_SOC_RAW);
 
 	if (fg_debug_mask & FG_STATUS)
@@ -5378,12 +5832,12 @@ static irqreturn_t fg_soc_irq_handler(int irq, void *_chip)
 	}
 
 	/* Backup last soc every delta soc interrupt */
-	chip->use_last_soc = false;
+	chip->use_last_soc_origin = false;
 	if (fg_reset_on_lockup) {
 		if (!chip->ima_error_handling)
-			chip->last_soc = get_monotonic_soc_raw(chip);
+			chip->last_soc_origin = get_monotonic_soc_raw(chip);
 		if (fg_debug_mask & FG_STATUS)
-			pr_info("last_soc: %d\n", chip->last_soc);
+			pr_info("last_soc_origin: %d\n", chip->last_soc_origin);
 
 		fg_stay_awake(&chip->cc_soc_wakeup_source);
 		schedule_work(&chip->cc_soc_store_work);
@@ -5986,7 +6440,7 @@ static void esr_extract_config_work(struct work_struct *work)
 	struct fg_chip *chip = container_of(work, struct fg_chip,
 						esr_extract_config_work);
 	bool input_present = is_input_present(chip);
-	int capacity = get_prop_capacity(chip);
+	int capacity = chip->capacity;    // modify 
 
 	if (input_present && capacity <= ESR_EXTRACT_STOP_SOC) {
 		fg_config_esr_extract(chip, true);
@@ -6306,6 +6760,24 @@ fail:
 	return -EINVAL;
 }
 
+ssize_t battery_print_name(struct switch_dev *sdev,char *buf)
+{
+	return sprintf(buf,"%s\n",battery_name.battery_name_type);
+}
+static int battery_switch_register(void)
+{
+	int ret;
+	battery_name.battery_switch_dev.name="battery";
+	battery_name.battery_switch_dev.print_name=battery_print_name;
+	ret = switch_dev_register(&battery_name.battery_switch_dev);
+	if(ret<0)
+		return ret;
+	battery_name.battery_switch_dev.state=0;
+	switch_set_state(&battery_name.battery_switch_dev,
+		battery_name.battery_switch_dev.state);
+	return 0;
+}
+
 #define FG_PROFILE_LEN			128
 #define PROFILE_COMPARE_LEN		32
 #define THERMAL_COEFF_ADDR		0x444
@@ -6438,6 +6910,10 @@ wait:
 		rc = 0;
 		goto no_profile;
 	}
+	/* Add sys/class/switch/battery node for fw read battery profile */
+	strcpy(battery_name.battery_name_type,batt_type_str);
+	battery_switch_register();
+	/* Add end */
 
 	if (!chip->batt_profile)
 		chip->batt_profile = devm_kzalloc(chip->dev,
@@ -7524,6 +8000,13 @@ static int fg_remove(struct spmi_device *spmi)
 
 	fg_cleanup(chip);
 	dev_set_drvdata(&spmi->dev, NULL);
+/* add asus battery master function */
+#if (defined ASUS_BATTERY_MASTER_FUNCTION)
+	switch_dev_unregister(&chip->sdev);
+	root_device_unregister(chip->battery_master_root_dev);
+	cancel_delayed_work(&chip->bat_master_workqueue);
+#endif
+/* end */
 	return 0;
 }
 
@@ -8388,7 +8871,7 @@ static void ima_error_recovery_work(struct work_struct *work)
 	 * Without this, there could be a fluctuation in SOC values notified
 	 * to the userspace.
 	 */
-	chip->use_last_soc = true;
+	chip->use_last_soc_origin = true;
 
 	/* Block SRAM access till FG reset is complete */
 	chip->block_sram_access = true;
@@ -8400,7 +8883,7 @@ static void ima_error_recovery_work(struct work_struct *work)
 	fg_cancel_all_works(chip);
 
 	if (fg_debug_mask & FG_STATUS)
-		pr_info("last_soc: %d\n", chip->last_soc);
+		pr_info("last_soc_origin: %d\n", chip->last_soc_origin);
 
 	mutex_lock(&chip->ima_recovery_lock);
 	/* Acquire IMA access forcibly from FG ALG */
@@ -8918,6 +9401,60 @@ static int fg_probe(struct spmi_device *spmi)
 	memset(chip->batt_info, INT_MAX, sizeof(chip->batt_info));
 
 	schedule_work(&chip->init_work);
+
+#if (defined ASUS_BATTERY_MASTER_FUNCTION)
+	chip->debug_flag = false;
+	chip->user_limit_read = true;
+	chip->user_capacity_limit = 0;
+	chip->last_user_capacity_limit = 0;
+	chip->capacity_limit = false;
+	chip->last_capacity_limit = false;
+	chip->capacity_to_soc = false;
+	chip->battery_master_init = false;
+	chip->debug_capacity = CAPACITY_MAPPING_THRESHOLD - 1;
+	chip->last_soc = CAPACITY_MAPPING_THRESHOLD - 1;
+	chip->last_capacity = CAPACITY_MAPPING_THRESHOLD + 1;
+	chip->battery_capacity = CAPACITY_MAPPING_THRESHOLD - 1;
+	chip->capacity_map_multiple = CAPACITY_MAPPING_MULTIPLE;
+	chip->capacity_map_divide = CAPACITY_MAPPING_DIVIDE;
+
+	INIT_DELAYED_WORK(&chip->bat_master_workqueue,battery_master_monitor_work_callback);
+	schedule_delayed_work(&chip->bat_master_workqueue, 1*HZ);
+	chip->sdev.name = "exttable";
+	rc = switch_dev_register(&chip->sdev);
+	if (rc  < 0) {
+		pr_err("%s(): register error: sdev.name: %s\n",
+				__func__, chip->sdev.name);
+	}
+
+	chip->battery_master_root_dev = root_device_register("battery_master");
+	if (IS_ERR(chip->battery_master_root_dev)) {
+		rc = PTR_ERR(chip->battery_master_root_dev);
+	}
+
+	rc = device_create_file(chip->battery_master_root_dev, &dev_attr_chg_limit);
+	if (rc) {
+		pr_err("%s(): create chg_limit error !\n", __func__);
+	}
+
+	rc = device_create_file(chip->battery_master_root_dev, &dev_attr_bat_map);
+	if (rc) {
+		pr_err("%s(): create bat_map error !\n", __func__);
+	}
+
+	rc = device_create_file(chip->battery_master_root_dev, &dev_attr_debug_capacity);
+	if (rc) {
+		pr_err("%s(): create debug_capacity error !\n", __func__);
+	}
+
+	rc = device_create_file(chip->battery_master_root_dev, &dev_attr_real_soc);
+	if (rc) {
+		pr_err("%s(): create real_soc error !\n", __func__);
+	}
+
+	dev_set_drvdata(chip->battery_master_root_dev, chip);
+#endif
+/* [PLATFORM]-Mod-END by pingao.yang */
 
 	pr_info("FG Probe success - FG Revision DIG:%d.%d ANA:%d.%d PMIC subtype=%d\n",
 		chip->revision[DIG_MAJOR], chip->revision[DIG_MINOR],

@@ -291,9 +291,19 @@ static void mdss_fb_set_bl_brightness(struct led_classdev *led_cdev,
 
 	/* This maps android backlight level 0 to 255 into
 	   driver backlight level 0 to bl_max with rounding */
-	MDSS_BRIGHT_TO_BL(bl_lvl, value, mfd->panel_info->bl_max,
-				mfd->panel_info->brightness_max);
+	//MDSS_BRIGHT_TO_BL(bl_lvl, value, mfd->panel_info->bl_max,
+		//		mfd->panel_info->brightness_max);
+		
+          if(value<101)
+          	{
 
+                           bl_lvl=10*value;
+		  }else
+		  	{
+
+                                bl_lvl=20*value-1005;
+
+		  }
 	if (!bl_lvl && value)
 		bl_lvl = 1;
 

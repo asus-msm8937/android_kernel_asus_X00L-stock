@@ -39,6 +39,60 @@
 #include <linux/msm_bcl.h>
 #include <linux/ktime.h>
 #include <linux/pmic-voter.h>
+#include <linux/switch.h>
+
+/*[PLATFORM]-Add-BEGIN by pingao.yang, 2016/07/11, add charge ntc debug simulate */
+//#define QPNP_NTC_DEBUG_SIMULATE
+#if (defined QPNP_NTC_DEBUG_SIMULATE)
+#include <linux/debugfs.h>
+#include <linux/uaccess.h>
+#endif
+/* [PLATFORM]-Mod-END by pingao.yang */
+
+/*[PLATFORM]-Add-BEGIN by pingao.yang, 2016/07/11, add battery temperature protection*/
+#define QPNP_BATTERY_NTC_PROTECTION
+#if (defined QPNP_BATTERY_NTC_PROTECTION)
+#include <linux/wakelock.h>
+
+#define NTC_PROTECTION_MES_INTERVAL	10*HZ
+
+#define SOFT_JEITA_COLD_DEGREE  0
+#define SOFT_JEITA_COOL_DEGREE  100
+#define SOFT_JEITA_WARM_DEGREE  500
+#define SOFT_JEITA_HOT_DEGREE   600
+#define SOFT_JEITA_COOL_CURRENT  700
+#define SOFT_JEITA_GOOD_CURRENT  950
+#define SOFT_JEITA_WARM_VOLTAGE  4080
+#define SOFT_JEITA_GOOD_VOLTAGE  4380
+#define SOFT_LIMIT_CHG_VOLTAGE  4180000  //uv
+#define SOFT_LIMIT_CHG_CURRENT  901      //ma
+
+enum battery_health_type {
+	BATTERY_HEALTH_GOOD,
+	BATTERY_HEALTH_OVERHEAT,
+	BATTERY_HEALTH_WARM,
+	BATTERY_HEALTH_COOL,
+	BATTERY_HEALTH_COLD,
+};
+#endif
+/* [PLATFORM]-Mod-END by pingao.yang */
+
+/*[PLATFORM]-Add-BEGIN by pingao.yang, 2017/02/17, add enable shipping mode */
+#define QPNP_SHIP_MODE_DEBUG
+/* [PLATFORM]-Mod-END by pingao.yang */
+
+/*[BUG]-Add-BEGIN by pingao.yang, 2017/05/19, pr-261203, add usb port temp check */
+#define WT_THERMAL_CLASS_NAME  "wt_thermal"
+struct class *wt_thermal_class;
+#define USB_THERMAL_NAME  "usb_thermal"
+#define TEMP_DET_NOTIFY_MS	10000
+#define USB_TEMP_DET_NOTIFY_MS	1000
+#define OTG_TEMP_DET_NOTIFY_MS	3000
+#define USBCHG_DEFAULT_TEMP 25
+#define USBCHG_DISABLE_CHG_TEMP	700
+#define USBCHG_ENABLE_CHG_TEMP	600
+bool	usb_alert_suspend = false;
+/*[BUG]-Add-END by pingao.yang, 2017/05/19 */
 
 /* Mask/Bit helpers */
 #define _SMB_MASK(BITS, POS) \
@@ -274,6 +328,26 @@ struct smbchg_chip {
 	u32				vchg_adc_channel;
 	struct qpnp_vadc_chip		*vchg_vadc_dev;
 
+/*[BUG]-Add-BEGIN by pingao.yang, 2017/05/19, pr-261203, add usb port temp check */
+	struct device *usb_thermal;
+	u32				usbchg_allow_protect;
+	bool 			pre_usbchg_temp_enable;
+	bool 			pre_otgchg_temp_enable;
+	bool				pre_usbchg_temp_alert;
+	bool				usbchg_temp_alert;
+	u32				usbchg_debug_flag;
+	int				usbchg_debug_temp;
+	int 				usbchg_temp;
+	int				usbchg_disable_chg_temp;
+	int				usbchg_enable_chg_temp;
+	u32				usbchg_temp_adc_channel;
+	struct qpnp_vadc_chip	*usbchg_temp_vadc_dev;
+	u32				board_temp_adc_channel;
+	struct qpnp_vadc_chip	*board_temp_vadc_dev;
+	struct delayed_work		temp_det_work;
+	struct switch_dev sdev;
+/*[BUG]-Add-END by pingao.yang, 2017/05/19 */
+
 	/* voters */
 	struct votable			*fcc_votable;
 	struct votable			*usb_icl_votable;
@@ -285,6 +359,31 @@ struct smbchg_chip {
 	struct votable			*hw_aicl_rerun_enable_indirect_votable;
 	struct votable			*aicl_deglitch_short_votable;
 	struct votable			*hvdcp_enable_votable;
+
+	/*  add test work */
+	#if (defined QPNP_SHOW_CHARGING_INFO)
+	struct delayed_work show_charging_info_workqueue;
+	#endif
+	/*[PLATFORM]-Add-BEGIN by pingao.yang, 2016/07/11, add battery temperature protection*/
+#if (defined QPNP_BATTERY_NTC_PROTECTION)
+	int init_temperature;
+	enum battery_health_type bat_health;
+	int index;
+	u8 charge_status;
+	u8 charger_type;
+	int ntc_temp;
+	int capacity;
+	struct delayed_work monitor_workqueue;
+	struct wake_lock	monitor_wake_lock;
+#endif
+/*[PLATFORM]-Add-END by pingao.yang */
+
+/*[PLATFORM]-Add-BEGIN by pingao.yang, 2016/07/11, add charge ntc debug simulate */
+#if	(defined QPNP_NTC_DEBUG_SIMULATE)
+	struct dentry	*ntc_root;
+	int debug_temperature;
+#endif
+/* [PLATFORM]-Mod-END by pingao.yang */
 };
 
 enum qpnp_schg {
@@ -416,6 +515,8 @@ enum wake_reason {
 #define	HVDCP_PMIC_VOTER		"HVDCP_PMIC_VOTER"
 #define	HVDCP_OTG_VOTER			"HVDCP_OTG_VOTER"
 #define	HVDCP_PULSING_VOTER		"HVDCP_PULSING_VOTER"
+static int smbchg_charging_en(struct smbchg_chip *chip, bool en);
+static int smbchg_charging_is_enable(struct smbchg_chip *chip);
 
 static int smbchg_debug_mask;
 module_param_named(
@@ -439,19 +540,19 @@ module_param_named(
 	int, S_IRUSR | S_IWUSR
 );
 
-static int smbchg_default_hvdcp_icl_ma = 1800;
+static int smbchg_default_hvdcp_icl_ma = 1000;//modify by dgy usb cable current 1000ma
 module_param_named(
 	default_hvdcp_icl_ma, smbchg_default_hvdcp_icl_ma,
 	int, S_IRUSR | S_IWUSR
 );
 
-static int smbchg_default_hvdcp3_icl_ma = 3000;
+static int smbchg_default_hvdcp3_icl_ma = 1000;//modify by dgy usb cable current 1000ma
 module_param_named(
 	default_hvdcp3_icl_ma, smbchg_default_hvdcp3_icl_ma,
 	int, S_IRUSR | S_IWUSR
 );
 
-static int smbchg_default_dcp_icl_ma = 1800;
+static int smbchg_default_dcp_icl_ma = 1000;//modify by dgy usb cable current 1000ma
 module_param_named(
 	default_dcp_icl_ma, smbchg_default_dcp_icl_ma,
 	int, S_IRUSR | S_IWUSR
@@ -468,6 +569,9 @@ module_param_named(
 	wipower_dcin_interval, wipower_dcin_interval,
 	int, S_IRUSR | S_IWUSR
 );
+
+struct smbchg_chip *private_chip;
+static int smbchg_shipping_mode_enable(struct smbchg_chip *chip, bool en);
 
 #define WIPOWER_DEFAULT_HYSTERISIS_UV	250000
 static int wipower_dcin_hyst_uv = WIPOWER_DEFAULT_HYSTERISIS_UV;
@@ -920,6 +1024,8 @@ static void read_usb_type(struct smbchg_chip *chip, char **usb_type_name,
 #define BATT_TAPER_CHG_VAL		0x3
 #define CHG_INHIBIT_BIT			BIT(1)
 #define BAT_TCC_REACHED_BIT		BIT(7)
+
+extern int battery_master_get_capacity_limit_flag(void);
 static int get_prop_batt_status(struct smbchg_chip *chip)
 {
 	int rc, status = POWER_SUPPLY_STATUS_DISCHARGING;
@@ -928,7 +1034,7 @@ static int get_prop_batt_status(struct smbchg_chip *chip)
 
 	charger_present = is_usb_present(chip) | is_dc_present(chip) |
 			  chip->hvdcp_3_det_ignore_uv;
-	if (!charger_present)
+	if ((!charger_present) || chip->pre_usbchg_temp_enable == true)	//modify by pingao.yang
 		return POWER_SUPPLY_STATUS_DISCHARGING;
 
 	rc = smbchg_read(chip, &reg, chip->chgr_base + RT_STS, 1);
@@ -943,6 +1049,15 @@ static int get_prop_batt_status(struct smbchg_chip *chip)
 	chg_inhibit = reg & CHG_INHIBIT_BIT;
 	if (chg_inhibit)
 		return POWER_SUPPLY_STATUS_FULL;
+
+	if (battery_master_get_capacity_limit_flag() && (chip->capacity == 100)) {//bug 266540 modify by diganyun 2017/06/15
+		smbchg_charging_en(chip, false);
+		return POWER_SUPPLY_STATUS_FULL;
+	} else {
+		if(smbchg_charging_is_enable(chip) && chip->chg_enabled) { // when charging_enabled node is 1, enable the CHG_ENABLE Regs to fix error
+			smbchg_charging_en(chip, true);
+		}
+	}
 
 	rc = smbchg_read(chip, &reg, chip->chgr_base + CHGR_STS, 1);
 	if (rc < 0) {
@@ -1454,6 +1569,86 @@ static void use_pmi8996_tables(struct smbchg_chip *chip)
 	chip->tables.aicl_rerun_period_len = ARRAY_SIZE(aicl_rerun_period);
 }
 
+/*[PLATFORM]-Add-BEGIN by pingao.yang, 2017/02/17, add enable shipping mode */
+#if (defined QPNP_SHIP_MODE_DEBUG)
+#define SEC_ACCESS_REG	0xD0
+#define SEC_UNLOCK	0xA5
+#define SHIP_MODE_REG	0x40
+#define EN_SHIP_MODE_BIT	BIT(0)
+//liyizeng add for bug 245675 start 20170310
+void smbchg_shipping_mode_enable_ext(bool en)
+{
+	smbchg_shipping_mode_enable(private_chip, en);
+}
+//liyizeng add for bug 245675 end 20170310
+static int smbchg_shipping_mode_enable(struct smbchg_chip *chip, bool en)
+{
+	int rc = 0;
+	rc = smbchg_masked_write(chip, chip->bat_if_base + SEC_ACCESS_REG,
+			0xff, SEC_UNLOCK);
+	if (rc < 0)
+		dev_err(chip->dev, "Couldn't set unlock secure registers rc = %d\n", rc);
+
+	/* The en bit is configured active low */
+	rc = smbchg_masked_write(chip, chip->bat_if_base + SHIP_MODE_REG,
+			EN_SHIP_MODE_BIT, en ? 0 : EN_SHIP_MODE_BIT);
+	if (rc < 0)
+		dev_err(chip->dev, "Couldn't set shipping mode rc = %d\n", rc);
+
+	return rc;
+}
+
+static int shipping_mode_show(struct seq_file *m, void *data)
+{
+	printk("user open shipping_mode_enable file\n");
+	return 0;
+}
+
+static ssize_t shipping_mode_write(struct file *file, const char __user *ubuf,
+				size_t count, loff_t *ppos)
+{
+	struct seq_file *s = file->private_data;
+	struct smbchg_chip *chip = s->private;
+
+	char buf[10];
+
+	memset(buf, 0x00, sizeof(buf));
+	if (copy_from_user(&buf, ubuf, min_t(size_t, sizeof(buf) - 1, count)))
+		return -EFAULT;
+
+	if (!strncmp(buf, "1", 1)) {
+		//printk("user write shipping_mode_enable to 1 \n");
+		smbchg_shipping_mode_enable(chip, 1);
+	}
+	else if (!strncmp(buf, "0", 1)) {
+		//printk("user write shipping_mode_enable to 0 \n");
+		smbchg_shipping_mode_enable(chip, 0);
+	}
+	else{
+		printk("Usage: echo [1 or 0] > /sys/kernel/debug/qpnp-smbcharger/shipping_mode_enable\n");
+	}
+
+	return count;
+}
+
+static int shipping_mode_open(struct inode *inode, struct file *file)
+{
+	struct smbchg_chip *chip = inode->i_private;
+
+	return single_open(file, shipping_mode_show, chip);
+}
+
+static const struct file_operations shipping_mode_enable_ops = {
+	.owner		= THIS_MODULE,
+	.open		= shipping_mode_open,
+	.read		= seq_read,
+	.write		= shipping_mode_write,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+#endif
+/* [PLATFORM]-Mod-END by pingao.yang */
+
 #define CMD_CHG_REG	0x42
 #define EN_BAT_CHG_BIT		BIT(1)
 static int smbchg_charging_en(struct smbchg_chip *chip, bool en)
@@ -1462,6 +1657,22 @@ static int smbchg_charging_en(struct smbchg_chip *chip, bool en)
 	return smbchg_masked_write(chip, chip->bat_if_base + CMD_CHG_REG,
 			EN_BAT_CHG_BIT, en ? 0 : EN_BAT_CHG_BIT);
 }
+
+static int smbchg_charging_is_enable(struct smbchg_chip *chip)
+{
+        int rc = 0;
+        u8 reg = 0;
+
+        rc = smbchg_read(chip, &reg, chip->bat_if_base + CMD_CHG_REG, 1);
+        if (rc < 0) {
+                dev_err(chip->dev,
+                                "Couldn't read charging enable bit rc=%d\n", rc);
+                return rc;
+        }
+
+       return (reg & EN_BAT_CHG_BIT) ? 1 : 0;
+}
+
 
 #define CMD_IL			0x40
 #define USBIN_SUSPEND_BIT	BIT(4)
@@ -2604,7 +2815,7 @@ static int charging_suspend_vote_cb(struct votable *votable, void *data,
 {
 	int rc;
 	struct smbchg_chip *chip = data;
-
+    dev_err(chip->dev, "[allan]:smbchg_charging_en: suspend  = %d !!!!!!!!!!\n", suspend);
 	if (suspend < 0) {
 		pr_err("No voters\n");
 		suspend = false;
@@ -3071,6 +3282,12 @@ static int smbchg_system_temp_level_set(struct smbchg_chip *chip,
 	mutex_lock(&chip->therm_lvl_lock);
 	prev_therm_lvl = chip->therm_lvl_sel;
 	chip->therm_lvl_sel = lvl_sel;
+
+	thermal_icl_ma =
+			(int)chip->thermal_mitigation[chip->therm_lvl_sel];
+	pr_smb(PR_MISC, "prev_therm_lvl = %d, therm_lvl_sel = %d, thermal_icl_ma = %d\n",
+			prev_therm_lvl, chip->therm_lvl_sel, thermal_icl_ma);
+
 	if (chip->therm_lvl_sel == (chip->thermal_levels - 1)) {
 		/*
 		 * Disable charging if highest value selected by
@@ -4343,7 +4560,7 @@ static int smbchg_register_chg_led(struct smbchg_chip *chip)
 {
 	int rc;
 
-	chip->led_cdev.name = "red";
+	chip->led_cdev.name = "smbcharger_red";
 	chip->led_cdev.brightness_set = smbchg_chg_led_brightness_set;
 	chip->led_cdev.brightness_get = smbchg_chg_led_brightness_get;
 
@@ -4648,7 +4865,7 @@ static int smbchg_set_optimal_charging_mode(struct smbchg_chip *chip, int type)
 }
 
 #define DEFAULT_SDP_MA		100
-#define DEFAULT_CDP_MA		1500
+#define DEFAULT_CDP_MA		1000  //modify by dgy usb cable current 1000ma
 static int smbchg_change_usb_supply_type(struct smbchg_chip *chip,
 						enum power_supply_type type)
 {
@@ -4791,6 +5008,30 @@ static void smbchg_hvdcp_det_work(struct work_struct *work)
 	smbchg_relax(chip, PM_DETECT_HVDCP);
 }
 
+// dgy add info show start
+#if (defined QPNP_SHOW_CHARGING_INFO)
+#define SHOW_CHARGING_INFO_MES_INTERVAL  10*HZ
+
+static void show_charging_info_workqueue_callback(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct smbchg_chip *chip = container_of(dwork,
+				struct smbchg_chip,
+				show_charging_info_workqueue);
+	int voltage_now,fast_now,batt_full,soc,temp,health,status = 0;
+	status = get_prop_batt_status(chip);
+	health = get_prop_batt_health(chip);
+	temp = get_prop_batt_temp(chip);
+	soc = get_prop_batt_capacity(chip);
+	voltage_now = get_prop_batt_voltage_now(chip);
+	fast_now = get_prop_batt_current_now(chip);
+	batt_full = get_prop_batt_full_charge(chip);
+	dev_dbg(chip->dev, "dgy show batt info : status = %d, health = %d, batt_temp = %d, soc= %d, voltage= %d, current = %d\n",
+						status, health, temp, soc, voltage_now, fast_now );
+	schedule_delayed_work(&chip->show_charging_info_workqueue, SHOW_CHARGING_INFO_MES_INTERVAL);
+}
+#endif
+// dgy add info show end
 static int set_usb_psy_dp_dm(struct smbchg_chip *chip, int state)
 {
 	int rc;
@@ -4949,6 +5190,12 @@ static void handle_usb_removal(struct smbchg_chip *chip)
 		HVDCP_SHORT_DEGLITCH_VOTER, false, 0);
 	if (!chip->hvdcp_not_supported)
 		restore_from_hvdcp_detection(chip);
+
+	/*[BUG]-Add-BEGIN by pingao.yang, 2017/05/19, pr-261203, add usb port temp check */
+	cancel_delayed_work_sync(&chip->temp_det_work);
+	schedule_delayed_work(&chip->temp_det_work,
+			msecs_to_jiffies(USB_TEMP_DET_NOTIFY_MS));
+	/*[BUG]-Add-END by pingao.yang, 2017/05/19 */
 }
 
 static bool is_usbin_uv_high(struct smbchg_chip *chip)
@@ -4986,6 +5233,12 @@ static void handle_usb_insertion(struct smbchg_chip *chip)
 				chip->usb_present);
 		power_supply_set_present(chip->usb_psy, chip->usb_present);
 	}
+
+	/*[BUG]-Add-BEGIN by pingao.yang, 2017/05/19, pr-261203, add usb port temp check */
+	cancel_delayed_work_sync(&chip->temp_det_work);
+	schedule_delayed_work(&chip->temp_det_work,
+			msecs_to_jiffies(USB_TEMP_DET_NOTIFY_MS));
+	/*[BUG]-Add-END by pingao.yang, 2017/05/19 */
 
 	/* Notify the USB psy if OV condition is not present */
 	if (!chip->usb_ov_det) {
@@ -5029,6 +5282,7 @@ static void handle_usb_insertion(struct smbchg_chip *chip)
 	}
 }
 
+int usb_state=-1;
 void update_usb_status(struct smbchg_chip *chip, bool usb_present, bool force)
 {
 	mutex_lock(&chip->usb_status_lock);
@@ -5040,9 +5294,13 @@ void update_usb_status(struct smbchg_chip *chip, bool usb_present, bool force)
 	}
 	if (!chip->usb_present && usb_present) {
 		chip->usb_present = usb_present;
+		//printk("xiehong add usb in!\n");
+		usb_state = 1;
 		handle_usb_insertion(chip);
 	} else if (chip->usb_present && !usb_present) {
 		chip->usb_present = usb_present;
+		//printk("xiehong add usb out!\n");
+		usb_state = 0;
 		handle_usb_removal(chip);
 	}
 
@@ -6176,6 +6434,7 @@ static int smbchg_battery_set_property(struct power_supply *psy,
 		rc = vote(chip->dc_suspend_votable, USER_EN_VOTER,
 				!val->intval, 0);
 		chip->chg_enabled = val->intval;
+		smbchg_charging_en(chip, true);
 		schedule_work(&chip->usb_set_online_work);
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
@@ -6472,7 +6731,220 @@ static int smbchg_dc_is_writeable(struct power_supply *psy,
 	}
 	return rc;
 }
+/*[PLATFORM]-Add-BEGIN by pingao.yang, 2016/07/11, add battery temperature protection*/
+#if (defined QPNP_BATTERY_NTC_PROTECTION)
+static void smb_chg_degree_notification(struct smbchg_chip *chip)
+{
+	bool bat_hot = 0, bat_cold = 0, bat_present = 0, bat_warm = 0, bat_cool = 0;
+	static bool chg_disen_flag,current_limit_flag,voltage_limit_flag,chg_nogood_flag,chg_vol_limit = false;
+	int vol_now;
 
+	pr_debug("smb_chg_degree_notification: temp = %d \n", chip->ntc_temp);
+	if (chip->ntc_temp >= SOFT_JEITA_HOT_DEGREE) {
+			chip->bat_health = BATTERY_HEALTH_OVERHEAT;
+			bat_hot = true;
+			bat_warm = false;
+			bat_cold = false;
+			bat_cool = false;
+			bat_present = true;
+	} else if (chip->ntc_temp >= SOFT_JEITA_WARM_DEGREE) {
+			chip->bat_health = BATTERY_HEALTH_WARM;
+			bat_hot = false;
+			bat_warm = true;
+			bat_cold = false;
+			bat_cool = false;
+			bat_present = true;
+	} else if (chip->ntc_temp >= SOFT_JEITA_COOL_DEGREE) {
+			chip->bat_health = BATTERY_HEALTH_GOOD;
+			bat_hot = false;
+			bat_warm = false;
+			bat_cold = false;
+			bat_cool = false;
+			bat_present = true;
+			/* bug 267593 when voltage over 4.18v,change current to 900ma modify by diganyun start */
+			vol_now = get_prop_batt_voltage_now(chip);
+            if(vol_now >= SOFT_LIMIT_CHG_VOLTAGE){
+				chg_vol_limit = true;
+            }else if(vol_now < SOFT_LIMIT_CHG_VOLTAGE){
+                chg_vol_limit = false;
+            }
+            if(chg_vol_limit){
+                smbchg_set_fastchg_current_raw(chip,SOFT_LIMIT_CHG_CURRENT);
+            }
+            /* bug 267593 when voltage over 4.18v,change current to 900ma modify by diganyun end */
+	} else if (chip->ntc_temp >= SOFT_JEITA_COLD_DEGREE) {
+			chip->bat_health = BATTERY_HEALTH_COOL;
+			bat_hot = false;
+			bat_warm = false;
+			bat_cold = false;
+			bat_cool = true;
+			bat_present = true;
+	}else{
+			chip->bat_health = BATTERY_HEALTH_COLD;
+			bat_hot = false;
+			bat_warm = false;
+			bat_cold = true;
+			bat_cool = false;
+			bat_present = true;
+	}
+
+#if 0 //modify by pingao.yang, pr-266034
+	if (bat_present)
+		chip->batt_present = false;
+	else
+		chip->batt_present = true;
+#endif
+
+	pr_debug("hot %d, cold %d, warm %d, cool %d, missing %d, bat_health = %d\n",
+		bat_hot, bat_cold, bat_warm,
+		bat_cool, chip->batt_present, chip->bat_health);
+
+	if ((bat_hot || bat_cold)&&(chg_disen_flag == false)) {
+		smbchg_charging_en(chip,0);//stop charging
+		chg_disen_flag = true;
+		chg_nogood_flag = true;
+		voltage_limit_flag = false;
+		current_limit_flag = false;
+		if(bat_hot){
+			chip->batt_cold= false;
+			chip->batt_cool= false;
+			chip->batt_warm= false;
+			chip->batt_hot = true;
+			set_property_on_fg(chip, POWER_SUPPLY_PROP_HEALTH,
+			get_prop_batt_health(chip));
+		}
+		if(bat_cold){
+			chip->batt_cold= true;
+			chip->batt_cool= false;
+			chip->batt_warm= false;
+			chip->batt_hot= false;
+			set_property_on_fg(chip, POWER_SUPPLY_PROP_HEALTH,
+			get_prop_batt_health(chip));
+		}
+	}else if(bat_warm && (voltage_limit_flag == false)) {
+		smbchg_float_voltage_set(chip,SOFT_JEITA_WARM_VOLTAGE);
+		voltage_limit_flag = true;
+		chg_nogood_flag = true;
+		chip->batt_cold= false;
+		chip->batt_cool= false;
+		chip->batt_warm = true;
+		chip->batt_hot= false;
+		set_property_on_fg(chip, POWER_SUPPLY_PROP_HEALTH,
+			get_prop_batt_health(chip));
+		if(current_limit_flag) {
+			smbchg_set_fastchg_current_raw(chip,SOFT_JEITA_GOOD_CURRENT);
+			current_limit_flag = false;
+		}
+		if(chg_disen_flag) {
+			smbchg_charging_en(chip,1);
+			chg_disen_flag = false;
+		}
+	}else if(bat_cool && (current_limit_flag == false)){
+		smbchg_set_fastchg_current_raw(chip,SOFT_JEITA_COOL_CURRENT);
+		current_limit_flag = true;
+		chg_nogood_flag = true;
+		chip->batt_cold= false;
+		chip->batt_cool= true;
+		chip->batt_warm= false;
+		chip->batt_hot= false;
+
+		set_property_on_fg(chip, POWER_SUPPLY_PROP_HEALTH,
+			get_prop_batt_health(chip));
+		if(voltage_limit_flag) {
+			smbchg_float_voltage_set(chip,SOFT_JEITA_GOOD_VOLTAGE);
+			voltage_limit_flag = false;
+		}
+		if(chg_disen_flag) {
+			smbchg_charging_en(chip,1);
+			chg_disen_flag = false;
+		}
+	} else if((!bat_cold) && (!bat_cool)&&(!bat_warm)&&(!bat_hot)&&chg_nogood_flag){
+		if(voltage_limit_flag) {
+			smbchg_float_voltage_set(chip,SOFT_JEITA_GOOD_VOLTAGE);
+			voltage_limit_flag = false;
+		}
+		if(current_limit_flag) {
+			smbchg_set_fastchg_current_raw(chip,SOFT_JEITA_GOOD_CURRENT);
+			current_limit_flag = false;
+		}
+		if(chg_disen_flag) {
+			smbchg_charging_en(chip,1);
+			chg_disen_flag = false;
+		}
+		chg_nogood_flag = false;
+		chip->batt_cold= false;
+		chip->batt_cool= false;
+		chip->batt_warm= false;
+		chip->batt_hot= false;
+
+		set_property_on_fg(chip, POWER_SUPPLY_PROP_HEALTH,
+			get_prop_batt_health(chip));
+	}
+}
+#endif
+
+#if (defined QPNP_BATTERY_NTC_PROTECTION)
+static void smb_get_charge_status(struct smbchg_chip *chip)
+{
+	chip->ntc_temp = get_prop_batt_temp(chip);
+	chip->charge_status = get_prop_batt_status(chip);
+	chip->charger_type = get_prop_charge_type(chip);
+	chip->capacity = get_prop_batt_capacity(chip);
+
+	dev_dbg(chip->dev, "chip->charge_status = %x,  chip->charger_type = %x, ntc_temp = %d, chip->capacity = %d\n",
+						chip->charge_status, chip->charger_type, chip->ntc_temp, chip->capacity);
+
+}
+
+static void ntc_protection_wakelock_enable(struct smbchg_chip *chip)
+{
+
+	if(POWER_SUPPLY_STATUS_CHARGING == chip->charge_status)
+	{
+		chip->charge_status = 1;
+	}else
+	{
+		chip->charge_status = 0;
+	}
+
+	if (chip->charge_status && !wake_lock_active(&chip->monitor_wake_lock)) {
+		wake_lock(&chip->monitor_wake_lock);
+	} else if (!chip->charge_status && wake_lock_active(&chip->monitor_wake_lock)) {
+		wake_unlock(&chip->monitor_wake_lock);
+	}
+
+	dev_dbg(chip->dev, "charger_type = %s, charge_status = %s, wake_lock = %s\n",
+					chip->charger_type ? "charger" : "no charger",
+					chip->charge_status ? "charging" : "not charging",
+					wake_lock_active(&chip->monitor_wake_lock) ? "active" : "inactive");
+}
+
+static void ntc_protection_notification(struct smbchg_chip *chip)
+{
+	dev_dbg(chip->dev, "[allan]:temp = %d\n", chip->ntc_temp);
+	smb_chg_degree_notification(chip);
+}
+static void dump_regs(struct smbchg_chip *chip);
+static void ntc_protection_monitor_work_callback(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct smbchg_chip *chip = container_of(dwork,
+					struct smbchg_chip, monitor_workqueue);
+	int voltage_now,fast_now,batt_full = 0;
+	voltage_now = get_prop_batt_voltage_now(chip);
+	fast_now = get_prop_batt_current_now(chip);
+	batt_full = get_prop_batt_full_charge(chip);
+	dev_dbg(chip->dev, "batt_full = %d, chip->charge_status = %d, capacity = %d, charger_type = %d,voltage= %d, current = %d\n",
+						batt_full, chip->charge_status, chip->capacity, chip->charger_type,voltage_now,fast_now );
+	dump_regs(chip);
+	smb_get_charge_status(chip);
+	ntc_protection_wakelock_enable(chip);
+	ntc_protection_notification(chip);
+
+	schedule_delayed_work(&chip->monitor_workqueue, NTC_PROTECTION_MES_INTERVAL);
+}
+#endif
+/*[PLATFORM]-Add-END by pingao.yang*/
 #define HOT_BAT_HARD_BIT	BIT(0)
 #define HOT_BAT_SOFT_BIT	BIT(1)
 #define COLD_BAT_HARD_BIT	BIT(2)
@@ -6833,10 +7305,12 @@ static irqreturn_t usbin_uv_handler(int irq, void *_chip)
 			 * SDP or a grossly out of spec charger. Do not
 			 * draw any current from it.
 			 */
+/*
 			rc = vote(chip->usb_suspend_votable,
 					WEAK_CHARGER_EN_VOTER, true, 0);
 			if (rc < 0)
 				pr_err("could not disable charger: %d", rc);
+*/
 		} else if (aicl_level == chip->tables.usb_ilim_ma_table[0]) {
 			/*
 			 * we are in a situation where the adapter is not able
@@ -7022,6 +7496,12 @@ static irqreturn_t usbid_change_handler(int irq, void *_chip)
 	/* update FG */
 	set_property_on_fg(chip, POWER_SUPPLY_PROP_STATUS,
 			get_prop_batt_status(chip));
+
+	/*[BUG]-Add-BEGIN by pingao.yang, 2017/05/19, pr-261203, add usb port temp check */
+	cancel_delayed_work_sync(&chip->temp_det_work);
+	schedule_delayed_work(&chip->temp_det_work,
+			msecs_to_jiffies(OTG_TEMP_DET_NOTIFY_MS));
+	/*[BUG]-Add-END by pingao.yang, 2017/05/19 */
 
 	return IRQ_HANDLED;
 }
@@ -7841,6 +8321,13 @@ static int smb_parse_dt(struct smbchg_chip *chip)
 	OF_PROP_READ(chip, chip->vchg_adc_channel,
 			"vchg-adc-channel-id", rc, 1);
 
+/*[BUG]-Add-BEGIN by pingao.yang, 2017/05/19, pr-261203, add usb port temp check */
+	OF_PROP_READ(chip, chip->usbchg_temp_adc_channel,
+			"usbchg_temp-channel-id", rc, 1);
+	OF_PROP_READ(chip, chip->board_temp_adc_channel,
+			"board_temp-channel-id", rc, 1);
+/*[BUG]-Add-END by pingao.yang, 2017/05/19 */
+
 	/* read boolean configuration properties */
 	chip->use_vfloat_adjustments = of_property_read_bool(node,
 						"qcom,autoadjust-vfloat");
@@ -8286,6 +8773,21 @@ static int create_debugfs_entries(struct smbchg_chip *chip)
 			"Couldn't create force dcin icl check file\n");
 		return -EINVAL;
 	}
+
+/*[PLATFORM]-Add-BEGIN by pingao.yang, 2017/02/17, add enable shipping mode */
+#if (defined QPNP_SHIP_MODE_DEBUG)
+	ent = debugfs_create_file("shipping_mode_enable",
+				  S_IFREG | S_IWUSR | S_IRUGO,
+				  chip->debug_root, chip,
+				  &shipping_mode_enable_ops);
+	if (!ent) {
+		dev_err(chip->dev,
+			"Couldn't create shipping mode enable file\n");
+		return -EINVAL;
+	}
+#endif
+/* [PLATFORM]-Mod-END by pingao.yang */
+
 	return 0;
 }
 
@@ -8413,12 +8915,305 @@ static void rerun_hvdcp_det_if_necessary(struct smbchg_chip *chip)
 	}
 }
 
-static int smbchg_probe(struct spmi_device *spmi)
+/*[BUG]-Add-BEGIN by pingao.yang, 2017/05/19, pr-261203, add usb port temp check */
+static int smbchg_get_usbchg_temp(struct smbchg_chip *chip)
 {
 	int rc;
+	struct qpnp_vadc_result usbchg_temp_result;
+
+	if (chip->usbchg_temp_vadc_dev
+		&& chip->usbchg_temp_adc_channel != -EINVAL) {
+		rc = qpnp_vadc_read(chip->usbchg_temp_vadc_dev,
+				chip->usbchg_temp_adc_channel, &usbchg_temp_result);
+		if (rc) {
+			pr_smb(PR_STATUS,
+				"error in usbchg_temp (channel-%d) read rc = %d\n",
+						chip->usbchg_temp_adc_channel, rc);
+			return USBCHG_DEFAULT_TEMP;
+		}
+
+		pr_smb(PR_MISC, "get_usbchg_temp %d, %lld\n",
+				usbchg_temp_result.adc_code, usbchg_temp_result.physical);
+	}
+
+	return usbchg_temp_result.physical;
+}
+
+#define BOARD_TEMP_DEFAULT_TEMP 25
+
+
+static int smbchg_get_board_temp(struct smbchg_chip *chip)
+{
+	int rc;
+	struct qpnp_vadc_result board_temp_result;
+
+	if (chip->board_temp_vadc_dev
+		&& chip->board_temp_adc_channel != -EINVAL) {
+		rc = qpnp_vadc_read(chip->board_temp_vadc_dev,
+				chip->board_temp_adc_channel, &board_temp_result);
+		if (rc) {
+			pr_smb(PR_STATUS,
+				"error in board_temp (channel-%d) read rc = %d\n",
+						chip->board_temp_adc_channel, rc);
+			return BOARD_TEMP_DEFAULT_TEMP;
+		}
+
+		pr_smb(PR_MISC, "get_board_temp %d, %lld\n",
+				board_temp_result.adc_code, board_temp_result.physical);
+	}
+
+	return board_temp_result.physical;
+}
+
+bool get_usb_alert_status(void)
+{
+	return usb_alert_suspend;
+}
+
+static int usb_thermal_enable_charging(struct smbchg_chip *chip, bool enable)
+{
+	int rc = 0;
+	bool usbchg_enable = enable;
+
+	if (chip->pre_usbchg_temp_enable == usbchg_enable)
+		return rc;
+
+	usb_alert_suspend = usbchg_enable;
+	pr_smb(PR_MISC, "pre_enable = %d, new_enable  = %d, usb_alert = %d\n",
+				chip->pre_usbchg_temp_enable,
+				usbchg_enable, usb_alert_suspend);
+
+	chip->pre_usbchg_temp_enable = usbchg_enable;
+	rc = vote(chip->usb_suspend_votable, THERMAL_EN_VOTER, usbchg_enable, 0);
+	if (rc < 0) {
+		dev_err(chip->dev,
+			"Couldn't set battchg suspend rc %d\n", rc);
+	}
+
+	return rc;
+}
+
+static int usb_thermal_otg_regulator_disable(struct smbchg_chip *chip, bool enable)
+{
+	int rc = 0;
+	bool otgchg_enable = enable;
+
+	if (chip->pre_otgchg_temp_enable == otgchg_enable)
+		return rc;
+
+	pr_smb(PR_MISC, "pre_otg_enable = %d, new_otg_enable  = %d\n",
+				chip->pre_otgchg_temp_enable, otgchg_enable);
+
+	chip->pre_otgchg_temp_enable = otgchg_enable;
+	if (!chip->otg_pinctrl) {
+		rc = smbchg_masked_write(chip, chip->bat_if_base + CMD_CHG_REG,
+				OTG_EN_BIT, 0);
+		if (rc < 0)
+			dev_err(chip->dev, "Couldn't disable OTG mode rc=%d\n",
+					rc);
+	}
+
+	return rc;
+}
+
+static int usb_thermal_check_usb_port_temp(struct smbchg_chip *chip)
+{
+	int rc = 0;
+	static bool usbchg_temp_enable = true;
+	static bool otgchg_temp_enable = true;
+
+	if (chip->usbchg_debug_flag == true) {
+		chip->usbchg_temp = chip->usbchg_debug_temp;
+	} else {
+		chip->usbchg_temp = smbchg_get_usbchg_temp(chip);
+	}
+
+	if (is_usb_present(chip)) {
+		if (chip->usbchg_temp >= chip->usbchg_disable_chg_temp
+			&& chip->usbchg_allow_protect) {
+			//new_temp >= 70
+			usbchg_temp_enable = false;
+		} else if (chip->usbchg_temp <= chip->usbchg_enable_chg_temp) {
+			//new_temp <= 60
+			//usbchg_temp_enable = true;
+		} else {
+			pr_smb(PR_MISC, "usb present, temp normal : do nothing ! \n");
+		}
+	} else {
+		//usb remove
+		usbchg_temp_enable = true;
+		pr_smb(PR_MISC, "usb remove !\n");
+	}
+
+	usb_thermal_enable_charging(chip, !usbchg_temp_enable);
+
+	if (is_otg_present(chip)) {
+		if (chip->usbchg_temp >= chip->usbchg_disable_chg_temp
+			&& chip->usbchg_allow_protect) {
+			//new_temp >= 70
+			otgchg_temp_enable = false;
+		} else if (chip->usbchg_temp <= chip->usbchg_enable_chg_temp) {
+			//new_temp <= 60
+			//otgchg_temp_enable = true;
+		} else {
+			pr_smb(PR_MISC, "otg present, temp normal : do nothing !\n");
+		}
+	} else {
+		//otg remove
+		otgchg_temp_enable = true;
+		pr_smb(PR_MISC, "otg remove !\n");
+	}
+
+	usb_thermal_otg_regulator_disable(chip, !otgchg_temp_enable);
+
+	if (otgchg_temp_enable == false || usbchg_temp_enable == false) {
+		chip->usbchg_temp_alert = true;
+	} else if (otgchg_temp_enable == true && usbchg_temp_enable == true) {
+		chip->usbchg_temp_alert = false;
+	}
+
+	if (chip->usbchg_temp_alert != chip->pre_usbchg_temp_alert) {
+		chip->pre_usbchg_temp_alert = chip->usbchg_temp_alert;
+		switch_set_state(&chip->sdev, chip->usbchg_temp_alert);
+	}
+
+	pr_smb(PR_MISC, "usb_temp = %d, allow = %d, usb_enable = %d, otg_enable = %d, temp_alert = %d, pre_alert = %d\n",
+				chip->usbchg_temp, chip->usbchg_allow_protect,
+				usbchg_temp_enable, otgchg_temp_enable,
+				chip->pre_usbchg_temp_alert, chip->usbchg_temp_alert);
+
+	return rc;
+}
+
+static void smbchg_temp_detect_work(struct work_struct *work)
+{
+	struct smbchg_chip *chip = container_of(work,
+				struct smbchg_chip,
+				temp_det_work.work);
+
+	int bat_temp = 0;
+	int board_temp = 0;
+
+
+	usb_thermal_check_usb_port_temp(chip);
+	board_temp = smbchg_get_board_temp(chip);
+	bat_temp = get_prop_batt_temp(chip);
+
+	pr_smb(PR_MISC, "bat_temp = %d, board_temp = %d\n",
+			bat_temp, board_temp);
+
+	schedule_delayed_work(&chip->temp_det_work,
+			msecs_to_jiffies(TEMP_DET_NOTIFY_MS));
+}
+
+static ssize_t usb_thermal_temp_show(struct device *dev,
+					struct device_attribute *attr, char *buf)
+{
+	struct smbchg_chip *chip = dev_get_drvdata(dev);
+
+	return sprintf(buf, "%d\n", chip->usbchg_temp);
+}
+
+static ssize_t usb_thermal_temp_store(struct device *dev,
+					struct device_attribute *attr, const char *buf, size_t size)
+{
+	pr_smb(PR_MISC, "%s: do nothing !\n", __func__);
+
+	return size;
+}
+
+static ssize_t usb_thermal_temp_debug_show(struct device *dev,
+					struct device_attribute *attr, char *buf)
+{
+	struct smbchg_chip *chip = dev_get_drvdata(dev);
+
+	return sprintf(buf, "%d\n", chip->usbchg_debug_temp);
+}
+
+static ssize_t usb_thermal_temp_debug_store(struct device *dev,
+					struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct smbchg_chip *chip = dev_get_drvdata(dev);
+
+	if (!strncmp(buf, "temp", 4)) {
+		chip->usbchg_debug_flag = true;
+		chip->usbchg_debug_temp =  simple_strtol(&buf[4], NULL, 10);
+	} else {
+		pr_smb(PR_MISC, "echo tempxx > wt_thermal/usb_thermal/temp_debug error !\n");
+	}
+
+	return size;
+}
+
+static ssize_t usb_thermal_allow_protect_show(struct device *dev,
+					struct device_attribute *attr, char *buf)
+{
+	struct smbchg_chip *chip = dev_get_drvdata(dev);
+
+	pr_smb(PR_MISC, "%s: entry\n", __func__);
+	return sprintf(buf, "%s\n", chip->usbchg_allow_protect ? "allow" : "prohibit");
+}
+
+static ssize_t usb_thermal_allow_protect_store(struct device * dev,
+					struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct smbchg_chip *chip = dev_get_drvdata(dev);
+
+	if (!strncmp(buf, "allow", 5)) {
+		chip->usbchg_allow_protect =  simple_strtol(&buf[5], NULL, 10);
+	}
+
+	return size;
+}
+
+static ssize_t usb_thermal_alert_status_show(struct device *dev,
+					struct device_attribute *attr, char *buf)
+{
+	struct smbchg_chip *chip = dev_get_drvdata(dev);
+
+	pr_smb(PR_MISC, "%s: entry\n", __func__);
+	return sprintf(buf, "%s\n", chip->usbchg_temp_alert ? "alert" : "non_alert");
+}
+
+static ssize_t usb_thermal_alert_status_store(struct device * dev,
+					struct device_attribute *attr, const char *buf, size_t size)
+{
+	pr_smb(PR_MISC, "%s: do nothing !\n", __func__);
+
+	return size;
+}
+
+static DEVICE_ATTR(temp, S_IRUGO |S_IWUSR |S_IWGRP,
+						usb_thermal_temp_show,
+						usb_thermal_temp_store);
+static DEVICE_ATTR(temp_debug, S_IRUGO |S_IWUSR |S_IWGRP,
+						usb_thermal_temp_debug_show,
+						usb_thermal_temp_debug_store);
+static DEVICE_ATTR(alert_status, S_IRUGO |S_IWUSR |S_IWGRP,
+						usb_thermal_alert_status_show,
+						usb_thermal_alert_status_store);
+static DEVICE_ATTR(allow_protect, S_IRUGO |S_IWUSR |S_IWGRP,
+						usb_thermal_allow_protect_show,
+						usb_thermal_allow_protect_store);
+
+static struct device_attribute *usb_thermal_dev_attributes[] = {
+	&dev_attr_temp,
+	&dev_attr_temp_debug,
+	&dev_attr_alert_status,
+	&dev_attr_allow_protect,
+};
+/*[BUG]-Add-END by pingao.yang, 2017/05/19 */
+
+
+
+static int smbchg_probe(struct spmi_device *spmi)
+{
+	int rc, count;
 	struct smbchg_chip *chip;
 	struct power_supply *usb_psy, *typec_psy = NULL;
 	struct qpnp_vadc_chip *vadc_dev = NULL, *vchg_vadc_dev = NULL;
+	struct qpnp_vadc_chip *usbchg_temp_vadc_dev = NULL;
+	struct qpnp_vadc_chip *board_temp_vadc_dev = NULL;
 	const char *typec_psy_name;
 
 	usb_psy = power_supply_get_by_name("usb");
@@ -8466,6 +9261,30 @@ static int smbchg_probe(struct spmi_device *spmi)
 			return rc;
 		}
 	}
+
+/*[BUG]-Add-BEGIN by pingao.yang, 2017/05/19, pr-261203, add usb port temp check */
+	if (of_find_property(spmi->dev.of_node, "qcom,vbus_therm-vadc", NULL)) {
+		usbchg_temp_vadc_dev = qpnp_get_vadc(&spmi->dev, "vbus_therm");
+		if (IS_ERR(usbchg_temp_vadc_dev)) {
+			rc = PTR_ERR(usbchg_temp_vadc_dev);
+			if (rc != -EPROBE_DEFER)
+				dev_err(&spmi->dev, "Couldn't get vadc 'vbus_therm' rc=%d\n",
+						rc);
+			return rc;
+		}
+	}
+
+	if (of_find_property(spmi->dev.of_node, "qcom,board_temp-vadc", NULL)) {
+		board_temp_vadc_dev = qpnp_get_vadc(&spmi->dev, "board_temp");
+		if (IS_ERR(board_temp_vadc_dev)) {
+			rc = PTR_ERR(board_temp_vadc_dev);
+			if (rc != -EPROBE_DEFER)
+				dev_err(&spmi->dev, "Couldn't get vadc 'board_temp' rc=%d\n",
+						rc);
+			return rc;
+		}
+	}
+/*[BUG]-Add-END by pingao.yang, 2017/05/19 */
 
 	chip = devm_kzalloc(&spmi->dev, sizeof(*chip), GFP_KERNEL);
 	if (!chip) {
@@ -8561,6 +9380,9 @@ static int smbchg_probe(struct spmi_device *spmi)
 			smbchg_parallel_usb_en_work);
 	INIT_DELAYED_WORK(&chip->vfloat_adjust_work, smbchg_vfloat_adjust_work);
 	INIT_DELAYED_WORK(&chip->hvdcp_det_work, smbchg_hvdcp_det_work);
+	#if (defined QPNP_SHOW_CHARGING_INFO)
+	INIT_DELAYED_WORK(&chip->show_charging_info_workqueue, show_charging_info_workqueue_callback); //dgy add work
+	#endif
 	init_completion(&chip->src_det_lowered);
 	init_completion(&chip->src_det_raised);
 	init_completion(&chip->usbin_uv_lowered);
@@ -8576,6 +9398,56 @@ static int smbchg_probe(struct spmi_device *spmi)
 	chip->usb_online = -EINVAL;
 	dev_set_drvdata(&spmi->dev, chip);
 
+/*[BUG]-Add-BEGIN by pingao.yang, 2017/05/19, pr-261203, add usb port temp check */
+	INIT_DELAYED_WORK(&chip->temp_det_work, smbchg_temp_detect_work);
+	chip->usbchg_temp_vadc_dev = usbchg_temp_vadc_dev;
+	chip->board_temp_vadc_dev = board_temp_vadc_dev;
+	chip->pre_usbchg_temp_enable = false;
+	chip->pre_otgchg_temp_enable = false;
+	chip->usbchg_debug_flag = false;
+	chip->usbchg_allow_protect = false;
+	chip->pre_usbchg_temp_alert = false;
+	chip->usbchg_temp_alert = false;
+	chip->usbchg_disable_chg_temp = USBCHG_DISABLE_CHG_TEMP;
+	chip->usbchg_enable_chg_temp = USBCHG_ENABLE_CHG_TEMP;
+
+	chip->usb_thermal = kzalloc(sizeof(struct device), GFP_KERNEL);
+	if (!chip->usb_thermal) {
+		pr_smb(PR_STATUS, "kzalloc /sys/class/wt_thermal/usb_thermal fail !\n");
+	}
+
+	chip->usb_thermal->init_name = USB_THERMAL_NAME;
+	chip->usb_thermal->class = wt_thermal_class;
+	chip->usb_thermal->release = (void (*)(struct device *))kfree;
+	rc = device_register(chip->usb_thermal);
+	if (rc) {
+		pr_smb(PR_STATUS, "/sys/class/wt_thermal/usb_thermal register fail !\n");
+	}
+
+	rc = 0;
+	for (count = 0; count < ARRAY_SIZE(usb_thermal_dev_attributes); count++) {
+		rc = device_create_file(chip->usb_thermal,
+				usb_thermal_dev_attributes[count]);
+		if (rc)
+			break;
+	}
+	if (rc) {
+		while (--count >= 0) {
+			device_remove_file(chip->usb_thermal,
+				usb_thermal_dev_attributes[count]);
+		}
+		pr_smb(PR_STATUS, "/sys/class/wt_thermal/usb_thermal remove fail !\n");
+	}
+
+	chip->sdev.name = "usb_connector";
+	rc = switch_dev_register(&chip->sdev);
+	if (rc  < 0) {
+		pr_smb(PR_STATUS, "register error: sdev.name: %s\n", chip->sdev.name);
+	}
+
+	dev_set_drvdata(chip->usb_thermal, chip);
+/*[BUG]-Add-END by pingao.yang, 2017/05/19 */
+
 	spin_lock_init(&chip->sec_access_lock);
 	mutex_init(&chip->therm_lvl_lock);
 	mutex_init(&chip->usb_set_online_lock);
@@ -8584,6 +9456,11 @@ static int smbchg_probe(struct spmi_device *spmi)
 	mutex_init(&chip->pm_lock);
 	mutex_init(&chip->wipower_config);
 	mutex_init(&chip->usb_status_lock);
+	/*[PLATFORM]-Add-BEGIN by pingao.yang, 2016/07/11, add battery temperature protection*/
+#if (defined QPNP_BATTERY_NTC_PROTECTION)
+	INIT_DELAYED_WORK(&chip->monitor_workqueue, ntc_protection_monitor_work_callback);
+#endif
+/*[PLATFORM]-Add-END by pingao.yang*/
 	device_init_wakeup(chip->dev, true);
 
 	rc = smbchg_parse_peripherals(chip);
@@ -8695,9 +9572,36 @@ static int smbchg_probe(struct spmi_device *spmi)
 
 	rerun_hvdcp_det_if_necessary(chip);
 
+/*[BUG]-Add-BEGIN by pingao.yang, 2017/05/19, pr-261203, add usb port temp check */
+	schedule_delayed_work(&chip->temp_det_work,
+			msecs_to_jiffies(TEMP_DET_NOTIFY_MS));
+/*[BUG]-Add-END by pingao.yang, 2017/05/19 */
 	update_usb_status(chip, is_usb_present(chip), false);
+	/*[PLATFORM]-Add-BEGIN by pingao.yang, 2016/07/11, add battery temperature protection*/
+	#if (defined QPNP_BATTERY_NTC_PROTECTION)
+		chip->init_temperature = get_prop_batt_temp(chip);
+		chip->ntc_temp = chip->init_temperature;
+		if (chip->init_temperature <= SOFT_JEITA_COLD_DEGREE) {
+			chip->bat_health = BATTERY_HEALTH_COLD;
+		} else if (chip->init_temperature <= SOFT_JEITA_COOL_DEGREE) {
+			chip->bat_health = BATTERY_HEALTH_COOL;
+		} else if (chip->init_temperature <= SOFT_JEITA_WARM_DEGREE) {
+			chip->bat_health = BATTERY_HEALTH_GOOD;
+		} else if (chip->init_temperature <= SOFT_JEITA_HOT_DEGREE) {
+			chip->bat_health = BATTERY_HEALTH_WARM;
+		} else {
+			chip->bat_health = BATTERY_HEALTH_OVERHEAT;
+		}
+	schedule_delayed_work(&chip->monitor_workqueue, NTC_PROTECTION_MES_INTERVAL);
+	wake_lock_init(&chip->monitor_wake_lock, WAKE_LOCK_SUSPEND, "ntc_protection");
+	#endif
+/*[PLATFORM]-Add-END by pingao.yang*/
+	#if (defined QPNP_SHOW_CHARGING_INFO)
+	schedule_delayed_work(&chip->show_charging_info_workqueue, SHOW_CHARGING_INFO_MES_INTERVAL);
+	#endif
 	dump_regs(chip);
 	create_debugfs_entries(chip);
+	private_chip = chip;
 	dev_info(chip->dev,
 		"SMBCHG successfully probe Charger version=%s Revision DIG:%d.%d ANA:%d.%d batt=%d dc=%d usb=%d\n",
 			version_str[chip->schg_version],
@@ -8893,11 +9797,19 @@ static struct spmi_driver smbchg_driver = {
 
 static int __init smbchg_init(void)
 {
+/*[BUG]-Add-BEGIN by pingao.yang, 2017/05/19, pr-261203, add usb port temp check */
+	wt_thermal_class = class_create(THIS_MODULE, WT_THERMAL_CLASS_NAME);
+	if (IS_ERR(wt_thermal_class)) {
+		printk("wt_thermal class create error !\n");
+	}
+/*[BUG]-Add-END by pingao.yang, 2017/05/19 */
+
 	return spmi_driver_register(&smbchg_driver);
 }
 
 static void __exit smbchg_exit(void)
 {
+	class_destroy(wt_thermal_class);	//add by pingao.yang
 	return spmi_driver_unregister(&smbchg_driver);
 }
 

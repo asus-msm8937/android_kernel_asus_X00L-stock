@@ -133,7 +133,7 @@ static const DECLARE_TLV_DB_SCALE(digital_gain, 0, 1, 0);
 static const DECLARE_TLV_DB_SCALE(analog_gain, 0, 25, 1);
 static struct snd_soc_dai_driver msm8x16_wcd_i2s_dai[];
 /* By default enable the internal speaker boost */
-static bool spkr_boost_en = true;
+static bool spkr_boost_en = false;
 
 #define MSM8X16_WCD_ACQUIRE_LOCK(x) \
 	mutex_lock_nested(&x, SINGLE_DEPTH_NESTING)
@@ -2818,6 +2818,10 @@ static const char * const ext_spk_text[] = {
 	"Off", "On"
 };
 
+static const char * const hs_spk_text[] = {
+        "Off", "On"
+};
+
 static const char * const wsa_spk_text[] = {
 	"ZERO", "WSA"
 };
@@ -2837,6 +2841,10 @@ static const struct soc_enum adc2_enum =
 static const struct soc_enum ext_spk_enum =
 	SOC_ENUM_SINGLE(SND_SOC_NOPM, 0,
 		ARRAY_SIZE(ext_spk_text), ext_spk_text);
+
+static const struct soc_enum hs_spk_enum =
+        SOC_ENUM_SINGLE(SND_SOC_NOPM, 0,
+                ARRAY_SIZE(hs_spk_text), hs_spk_text);
 
 static const struct soc_enum wsa_spk_enum =
 	SOC_ENUM_SINGLE(SND_SOC_NOPM, 0,
@@ -2922,6 +2930,9 @@ static const struct soc_enum iir2_inp1_mux_enum =
 
 static const struct snd_kcontrol_new ext_spk_mux =
 	SOC_DAPM_ENUM("Ext Spk Switch Mux", ext_spk_enum);
+
+static const struct snd_kcontrol_new hs_spk_mux =
+        SOC_DAPM_ENUM("Headset Spk Switch Mux", hs_spk_enum);
 
 static const struct snd_kcontrol_new rx_mix1_inp1_mux =
 	SOC_DAPM_ENUM("RX1 MIX1 INP1 Mux", rx_mix1_inp1_chain_enum);
@@ -4434,9 +4445,13 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"HEADPHONE", NULL, "HPHL PA"},
 	{"HEADPHONE", NULL, "HPHR PA"},
 
+	{"Headset Spk", NULL, "Headset Spk Switch"},
 	{"Ext Spk", NULL, "Ext Spk Switch"},
 	{"Ext Spk Switch", "On", "HPHL PA"},
 	{"Ext Spk Switch", "On", "HPHR PA"},
+        {"Headset Spk Switch", "On", "HPHL PA"},
+        {"Headset Spk Switch", "On", "HPHR PA"},
+
 
 	{"HPHL PA", NULL, "HPHL"},
 	{"HPHR PA", NULL, "HPHR"},
@@ -4946,6 +4961,26 @@ static int msm8x16_wcd_codec_enable_spk_ext_pa(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
+static int msm8x16_wcd_codec_hs_spk_mux(struct snd_soc_dapm_widget *w,
+                struct snd_kcontrol *kcontrol, int event)
+{
+        struct snd_soc_codec *codec = w->codec;
+        dev_dbg(codec->dev, "%s: %s event = %d\n", __func__, w->name, event);
+        switch (event) {
+        case SND_SOC_DAPM_POST_PMU:
+                dev_dbg(w->codec->dev,
+                        "%s: enable headset set gpio 129 high\n", __func__);
+                gpio_set_value(129, 1);
+                break;
+        case SND_SOC_DAPM_PRE_PMD:
+                dev_dbg(w->codec->dev,
+                        "%s: enable speaker set gpio 129 low\n", __func__);
+                gpio_set_value(129, 0);
+                break;
+        }
+        return 0;
+}
+
 static int msm8x16_wcd_codec_enable_ear_pa(struct snd_soc_dapm_widget *w,
 	struct snd_kcontrol *kcontrol, int event)
 {
@@ -5042,6 +5077,8 @@ static const struct snd_soc_dapm_widget msm8x16_wcd_dapm_widgets[] = {
 
 	SND_SOC_DAPM_SPK("Ext Spk", msm8x16_wcd_codec_enable_spk_ext_pa),
 
+	SND_SOC_DAPM_SPK("Headset Spk", msm8x16_wcd_codec_hs_spk_mux),
+
 	SND_SOC_DAPM_OUTPUT("HEADPHONE"),
 	SND_SOC_DAPM_PGA_E("HPHL PA", MSM8X16_WCD_A_ANALOG_RX_HPH_CNP_EN,
 		5, 0, NULL, 0,
@@ -5108,6 +5145,9 @@ static const struct snd_soc_dapm_widget msm8x16_wcd_dapm_widgets[] = {
 
 	SND_SOC_DAPM_MUX("Ext Spk Switch", SND_SOC_NOPM, 0, 0,
 		&ext_spk_mux),
+
+        SND_SOC_DAPM_MUX("Headset Spk Switch", SND_SOC_NOPM, 0, 0,
+                &hs_spk_mux),
 
 	SND_SOC_DAPM_MIXER("RX1 MIX1", SND_SOC_NOPM, 0, 0, NULL, 0),
 	SND_SOC_DAPM_MIXER("RX2 MIX1", SND_SOC_NOPM, 0, 0, NULL, 0),

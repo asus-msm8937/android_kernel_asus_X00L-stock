@@ -263,7 +263,9 @@ static void halt_spmi_pmic_arbiter(void)
 				  SCM_IO_DISABLE_PMIC_ARBITER), &desc);
 	}
 }
-
+//liyizeng add for bug 245675 start 20170310
+extern void smbchg_shipping_mode_enable_ext(bool en);
+//liyizeng add for bug 245675 end 20170310
 static void msm_restart_prepare(const char *cmd)
 {
 	bool need_warm_reset = false;
@@ -307,7 +309,13 @@ static void msm_restart_prepare(const char *cmd)
 			qpnp_pon_set_restart_reason(
 				PON_RESTART_REASON_RECOVERY);
 			__raw_writel(0x77665502, restart_reason);
-		} else if (!strcmp(cmd, "rtc")) {
+		}
+//liyizeng add for bug 245675 start 20170310 
+		else if (!strncmp(cmd, "EnterShipingMode", 16)) {
+			smbchg_shipping_mode_enable_ext(1);
+		}
+//liyizeng add for bug 245675 end 20170310
+		 else if (!strcmp(cmd, "rtc")) {
 			qpnp_pon_set_restart_reason(
 				PON_RESTART_REASON_RTC);
 			__raw_writel(0x77665503, restart_reason);
@@ -323,6 +331,13 @@ static void msm_restart_prepare(const char *cmd)
 			qpnp_pon_set_restart_reason(
 				PON_RESTART_REASON_KEYS_CLEAR);
 			__raw_writel(0x7766550a, restart_reason);
+                }
+        // added begin by weiguoqiu for asus unlock tool 2017/05/19
+        else if (!strncmp(cmd, "oem-8",11)) {
+                        qpnp_pon_set_restart_reason(
+                                PON_RESTART_REASON_KEYS_CLEAR);
+                        __raw_writel(0x77665504, restart_reason);
+       // added begin by weiguoqiu for asus unlock tool 2017/05/19
 		} else if (!strncmp(cmd, "oem-", 4)) {
 			unsigned long code;
 			int ret;

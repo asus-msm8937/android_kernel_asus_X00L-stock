@@ -1,0 +1,9 @@
+#key 116  POWER
+#key 102  HOME
+#key 158  BACK
+#key 249  APP_SWITCH
+
+key 116   POWER		   WAKE    VIRTUAL
+key 102   HOME             VIRTUAL
+key 139   APP_SWITCH       VIRTUAL
+key 158   BACK         	   VIRTUAL

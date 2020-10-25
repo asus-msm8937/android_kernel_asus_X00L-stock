@@ -17,6 +17,7 @@
 #include <linux/notifier.h>
 
 #define MMC_CARD_CMDQ_BLK_SIZE 512
+#define EXT_CSD_PRE_EOL_INFO 267 /* RO*/ 
 
 struct mmc_cid {
 	unsigned int		manfid;
@@ -56,6 +57,7 @@ struct mmc_ext_csd {
 	u8			sec_feature_support;
 	u8			rel_sectors;
 	u8			rel_param;
+	u8          pre_eol_info; /*267*/ 
 	bool			enhanced_rpmb_supported;
 	u8			part_config;
 	u8			cache_ctrl;
@@ -132,7 +134,7 @@ struct mmc_ext_csd {
 	u8			cmdq_support;		/* 308 */
 	u8			barrier_support;	/* 486 */
 	u8			barrier_en;
-	u8			pre_eol_info;		/* 267 */
+
 	u8			device_life_time_est_typ_a;	/* 268 */
 	u8			device_life_time_est_typ_b;	/* 269 */
 
@@ -397,7 +399,7 @@ struct mmc_card {
  	unsigned int		erase_shift;	/* if erase unit is power 2 */
  	unsigned int		pref_erase;	/* in sectors */
  	u8			erased_byte;	/* value of erased bytes */
-
+   char emcp_info[40];  //mmc dev_info 
 	u32			raw_cid[4];	/* raw card CID */
 	u32			raw_csd[4];	/* raw card CSD */
 	u32			raw_scr[2];	/* raw card SCR */

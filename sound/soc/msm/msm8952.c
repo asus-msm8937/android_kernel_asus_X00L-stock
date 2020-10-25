@@ -33,6 +33,7 @@
 #include "../codecs/wsa881x-analog.h"
 #include <linux/regulator/consumer.h>
 #define DRV_NAME "msm8952-asoc-wcd"
+#include "aw87319_audio_pa.h"
 
 #define BTSCO_RATE_8KHZ 8000
 #define BTSCO_RATE_16KHZ 16000
@@ -97,7 +98,7 @@ static struct wcd_mbhc_config mbhc_cfg = {
 	.key_code[1] = KEY_VOICECOMMAND,
 	.key_code[2] = KEY_VOLUMEUP,
 	.key_code[3] = KEY_VOLUMEDOWN,
-	.key_code[4] = 0,
+	.key_code[4] = KEY_VOLUMEDOWN,
 	.key_code[5] = 0,
 	.key_code[6] = 0,
 	.key_code[7] = 0,
@@ -265,6 +266,17 @@ static int enable_spk_ext_pa(struct snd_soc_codec *codec, int enable)
 	struct snd_soc_card *card = codec->component.card;
 	struct msm8916_asoc_mach_data *pdata = snd_soc_card_get_drvdata(card);
 	int ret;
+
+        /* for AW87319 sound Speaker PA */
+        if (enable) {
+                pr_debug("%s: Enable external PA\n", __func__);
+                aw87319_audio_pa_speaker_on();
+                msleep(45);     // 42ms to 50ms, make sure the mode is built
+        } else {
+                pr_debug("%s: Disable external PA\n", __func__);
+                aw87319_audio_pa_off();
+        }
+
 
 	if (!gpio_is_valid(pdata->spk_ext_pa_gpio)) {
 		pr_err("%s: Invalid gpio: %d\n", __func__,
@@ -1568,16 +1580,16 @@ static void *def_msm8952_wcd_mbhc_cal(void)
 	 * 210-290 == Button 2
 	 * 360-680 == Button 3
 	 */
-	btn_low[0] = 75;
-	btn_high[0] = 75;
+	btn_low[0] = 115;
+	btn_high[0] = 115;
 	btn_low[1] = 150;
 	btn_high[1] = 150;
-	btn_low[2] = 225;
-	btn_high[2] = 225;
-	btn_low[3] = 450;
-	btn_high[3] = 450;
-	btn_low[4] = 500;
-	btn_high[4] = 500;
+	btn_low[2] = 325;
+	btn_high[2] = 325;
+	btn_low[3] = 650;
+	btn_high[3] = 650;
+	btn_low[4] = 700;
+	btn_high[4] = 700;
 
 	return msm8952_wcd_cal;
 }

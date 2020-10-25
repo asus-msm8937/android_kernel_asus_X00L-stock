@@ -249,8 +249,10 @@ struct qpnp_flash_led {
 	struct workqueue_struct		*ordered_workq;
 	struct qpnp_vadc_chip		*vadc_dev;
 	struct mutex			flash_led_lock;
+	struct qpnp_flash_led_buffer	*log;
 	struct dentry			*dbgfs_root;
 	int				num_leds;
+	u32				buffer_cnt;
 	u16				base;
 	u16				current_addr;
 	u16				current2_addr;
@@ -1881,7 +1883,17 @@ static void qpnp_flash_led_brightness_set(struct led_classdev *led_cdev,
 
 	if (value > flash_node->cdev.max_brightness)
 		value = flash_node->cdev.max_brightness;
-
+	
+	//add by allenyao for use one led control back cam;anothe led control front
+	pr_err(" brightness value is %d,allenyao_led,%d\n",value,__LINE__);
+	#if 1
+	if(flash_node->id == FLASH_LED_0)
+		led->num_leds=5;
+	if(flash_node->id == FLASH_LED_1)
+		led->num_leds=6;
+	#endif
+	//end
+	
 	flash_node->cdev.brightness = value;
 	if (led->flash_node[led->num_leds - 1].id ==
 						FLASH_LED_SWITCH) {
